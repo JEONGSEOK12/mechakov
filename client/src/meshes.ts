@@ -1,29 +1,10 @@
 import * as THREE from 'three';
 import { HUNTER_SIZE } from '../../shared/constants.ts';
 import type { GameMap, Station } from '../../shared/map.ts';
-import type { Vec3 } from '../../shared/types.ts';
+import type { Box, Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
-import { PROPS, type Theme } from '../../shared/props.ts';
-
-function crateTexture(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d')!;
-  g.fillStyle = '#a8743f';
-  g.fillRect(0, 0, 64, 64);
-  g.strokeStyle = '#6e4724';
-  g.lineWidth = 6;
-  g.strokeRect(3, 3, 58, 58);
-  g.beginPath();
-  g.moveTo(6, 6);
-  g.lineTo(58, 58);
-  g.stroke();
-  g.lineWidth = 1;
-  for (let y = 16; y < 64; y += 16) g.strokeRect(6, y, 52, 0);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
+import type { Theme } from '../../shared/props.ts';
+import { containerModel, propModel, rackModel } from './models.ts';
 
 /** One tile per 2 m of floor. */
 function floorTexture(base: string, half: number): THREE.Texture {
@@ -48,35 +29,20 @@ function floorTexture(base: string, half: number): THREE.Texture {
 
 const materials = new Map<string, THREE.Material>();
 
+const METAL = new Set(['barrel', 'locker', 'cabinet', 'gasBottle', 'extinguisher', 'generator', 'serverRack', 'pipes', 'handTruck', 'dumpster', 'paintCan']);
+
+/** One material per prop type; colors come from the model's vertex colors. */
 function propMaterial(type: string): THREE.Material {
   let m = materials.get(type);
   if (!m) {
-    m = type === 'crate'
-      ? new THREE.MeshStandardMaterial({ map: crateTexture(), roughness: 0.9 })
-      : new THREE.MeshStandardMaterial({ color: PROPS[type].color, roughness: 0.7, metalness: type === 'barrel' || type === 'locker' ? 0.3 : 0 });
+    m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: METAL.has(type) ? 0.5 : 0.8, metalness: METAL.has(type) ? 0.35 : 0 });
     materials.set(type, m);
   }
   return m;
 }
 
 /** A prop with its origin at its bottom center. Players disguised as it use the exact same mesh. */
-const geometries = new Map<string, THREE.BufferGeometry>();
-
-/** One geometry per prop type, shared by every mesh of that type (maps have hundreds). */
-function propGeometry(type: string): THREE.BufferGeometry {
-  let geo = geometries.get(type);
-  if (!geo) {
-    const def = PROPS[type];
-    const [w, h, d] = def.size;
-    if (def.shape === 'box') geo = new THREE.BoxGeometry(w, h, d);
-    else if (def.shape === 'cone') geo = new THREE.ConeGeometry(w / 2, h, 16);
-    else if (type === 'tire') geo = new THREE.TorusGeometry(w / 2 - h / 2, h / 2, 10, 20).rotateX(Math.PI / 2);
-    else geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 18);
-    geo.translate(0, h / 2, 0);
-    geometries.set(type, geo);
-  }
-  return geo;
-}
+const propGeometry = propModel;
 
 export function createPropMesh(type: string): THREE.Object3D {
   const mesh = new THREE.Mesh(propGeometry(type), propMaterial(type));
@@ -189,7 +155,25 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
 
   const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, roughness: 0.9 });
   const innerMats = pal.inner.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 }));
+  // Warehouse shelving and yard containers get detailed models; other walls are plain boxes.
+  const thin = (w: Box) => Math.min(w.max[0] - w.min[0], w.max[2] - w.min[2]);
+  const isRack = (w: Box) => map.theme === 'warehouse' && w.max[1] === 3.2 && thin(w) <= 1.3;
+  const isContainer = (w: Box) => map.theme === 'yard' && w.max[1] > 2 && w.max[1] < map.wallHeight + 2 && Math.abs(thin(w) - 2.4) < 0.01;
+  const racks = map.walls.filter(isRack);
+  const containers = map.walls.filter(isContainer);
+  for (const [geo, mat] of [
+    [racks.length ? rackModel(racks, map.seed) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 })],
+    [containers.length ? containerModel(containers, pal.inner) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 })],
+  ] as const) {
+    if (!geo) continue;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    root.add(mesh);
+    colliders.push(mesh);
+  }
   map.walls.forEach((w, i) => {
+    if (isRack(w) || isContainer(w)) return;
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
     const mat = size[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
