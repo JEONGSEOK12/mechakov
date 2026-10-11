@@ -1,5 +1,5 @@
 import {
-  GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, PROP_SPEED, SPRINT_MULT, SPRINT_SECONDS, STAMINA_REFILL_SECONDS,
+  GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, KNOCKBACK_AIR_DRAG, KNOCKBACK_GROUND_DRAG, PROP_SPEED, SPRINT_MULT, SPRINT_SECONDS, STAMINA_REFILL_SECONDS,
   STEP_HEIGHT, WINDED_UNTIL,
 } from './constants.ts';
 import { boxAt, overlaps } from './geometry.ts';
@@ -10,6 +10,9 @@ export interface BodyState {
   /** Bottom center. */
   pos: Vec3;
   vy: number;
+  /** Horizontal velocity from knockback (explosions); walking is separate. Fades fast on the ground. */
+  vx: number;
+  vz: number;
   onGround: boolean;
   /** 0..1, spent by sprinting. */
   stamina: number;
@@ -17,7 +20,7 @@ export interface BodyState {
   winded: boolean;
 }
 
-export const newBody = (pos: Vec3): BodyState => ({ pos, vy: 0, onGround: false, stamina: 1, winded: false });
+export const newBody = (pos: Vec3): BodyState => ({ pos, vy: 0, vx: 0, vz: 0, onGround: false, stamina: 1, winded: false });
 
 export function bodySize(role: Role, prop: string | null): Vec3 {
   if (role === 'prop' && prop) return propSize(prop);
@@ -29,11 +32,12 @@ function firstHit(box: Box, solids: Box[]): Box | null {
   return null;
 }
 
-function moveHorizontal(b: BodyState, size: Vec3, axis: 0 | 2, delta: number, solids: Box[]) {
-  if (delta === 0) return;
+/** Moves along one axis; returns true if a wall stopped it. */
+function moveHorizontal(b: BodyState, size: Vec3, axis: 0 | 2, delta: number, solids: Box[]): boolean {
+  if (delta === 0) return false;
   b.pos[axis] += delta;
   let hit = firstHit(boxAt(b.pos, size), solids);
-  if (!hit) return;
+  if (!hit) return false;
 
   // Walk up low ledges (pallets, tires) when standing on something.
   if (b.onGround) {
@@ -43,7 +47,7 @@ function moveHorizontal(b: BodyState, size: Vec3, axis: 0 | 2, delta: number, so
       const raised: Vec3 = [b.pos[0], top, b.pos[2]];
       if (!firstHit(boxAt(raised, size), solids)) {
         b.pos[1] = top;
-        return;
+        return false;
       }
     }
   }
@@ -54,6 +58,7 @@ function moveHorizontal(b: BodyState, size: Vec3, axis: 0 | 2, delta: number, so
       : hit.max[axis] + size[axis] / 2 + 1e-3;
     hit = firstHit(boxAt(b.pos, size), solids);
   }
+  return true;
 }
 
 function moveVertical(b: BodyState, size: Vec3, delta: number, solids: Box[]) {
@@ -118,8 +123,14 @@ export function stepBody(
     if (b.stamina >= WINDED_UNTIL) b.winded = false;
   }
   b.vy -= GRAVITY * dt;
-  moveHorizontal(b, size, 0, mx, solids);
-  moveHorizontal(b, size, 2, mz, solids);
+  // Knockback carries you through the air and dies off quickly once you land.
+  const drag = Math.exp(-(b.onGround ? KNOCKBACK_GROUND_DRAG : KNOCKBACK_AIR_DRAG) * dt);
+  b.vx *= drag;
+  b.vz *= drag;
+  if (Math.abs(b.vx) < 0.05) b.vx = 0;
+  if (Math.abs(b.vz) < 0.05) b.vz = 0;
+  if (moveHorizontal(b, size, 0, mx + b.vx * dt, solids)) b.vx = 0;
+  if (moveHorizontal(b, size, 2, mz + b.vz * dt, solids)) b.vz = 0;
   moveVertical(b, size, b.vy * dt, solids);
 }
 

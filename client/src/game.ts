@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, TICK_DT } from '../../shared/constants.ts';
+import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_COOLDOWN, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
@@ -14,6 +14,7 @@ import { Hud } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
 import { MapView } from './mapview.ts';
+import { RocketFx } from './rockets.ts';
 import { sfx, toggleMute } from './sfx.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
@@ -88,6 +89,8 @@ export class Game {
   private faceLocked = false;
   private lockedFace = 0;
   private lastShot = 0;
+  private lastRocket = 0;
+  private rocketFx = new RocketFx(this.scene);
   private spectateIndex = 0;
   private inventoryOpen = false;
   private mapView = new MapView(document.getElementById('hud')!);
@@ -197,6 +200,17 @@ export class Game {
           this.shake(0.25, 300);
         }
         break;
+      case 'boom': {
+        this.rocketFx.boom(msg.pos);
+        const d = this.camera.position.distanceTo(new THREE.Vector3(...msg.pos));
+        sfx.explosion(d);
+        this.shake(Math.max(0, 0.45 * (1 - d / 14)), 350);
+        if (msg.from === this.myId && msg.hit.some((id) => id !== this.myId && this.roster.get(id)?.role === 'hunter')) {
+          this.hud.hitmarker();
+          sfx.hitConfirm();
+        }
+        break;
+      }
       case 'kill': {
         const name = (id: number | null) => (id === null ? null : this.roster.get(id)?.name ?? '???');
         const killer = name(msg.killer);
@@ -212,6 +226,7 @@ export class Game {
         this.map = generateMap(msg.seed, msg.theme);
         this.world = buildWorld(this.scene, this.worldRoot, this.map);
         this.mapView.setMap(this.map);
+        this.rocketFx.clear();
         this.faceLocked = false;
         sfx.ambience(msg.theme === 'yard');
         break;
@@ -250,6 +265,7 @@ export class Game {
     this.latest = new Map(msg.players.map((p) => [p.id, p]));
     this.roster = new Map(msg.roster.map((p) => [p.id, p]));
     this.snaps.push({ at: this.timeAt, players: this.latest });
+    this.rocketFx.sync(msg.rockets ?? []);
     while (this.snaps.length > 30) this.snaps.shift();
 
     const me = this.me;
@@ -263,7 +279,7 @@ export class Game {
       return;
     }
     const before = this.body ? ([...this.body.pos] as Vec3) : null;
-    this.body = { pos: [...me.pos], vy: me.vy, onGround: me.onGround, stamina: me.stamina, winded: me.winded };
+    this.body = { pos: [...me.pos], vy: me.vy, vx: me.vx ?? 0, vz: me.vz ?? 0, onGround: me.onGround, stamina: me.stamina, winded: me.winded };
     this.pending = this.pending.filter((i) => i.seq > me.seq);
     const frozen = this.phase === 'hide' && me.role === 'hunter';
     for (const i of this.pending) {
@@ -342,12 +358,28 @@ export class Game {
       this.spectateIndex++;
       return;
     }
+    if (me.role === 'prop') {
+      this.fireRocket();
+      return;
+    }
     if (me.role !== 'hunter' || this.phase !== 'hunt') return;
     const now = performance.now();
     if (now - this.lastShot < FIRE_COOLDOWN * 1000) return;
     this.lastShot = now;
     const p = this.camera.position;
     this.net.send({ t: 'shoot', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
+  }
+
+  /** Props fire a rocket where the crosshair points; the server decides if it's allowed. */
+  private fireRocket() {
+    if (this.phase === 'end' || (this.phase === 'hide' && !this.manualStart)) return;
+    const now = performance.now();
+    if (now - this.lastRocket < ROCKET_COOLDOWN * 1000) return;
+    this.lastRocket = now;
+    const p = this.camera.position;
+    this.net.send({ t: 'rocket', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
+    sfx.rocketFire();
+    this.shake(0.05, 100);
   }
 
   private addTracer(from: Vec3, to: Vec3, color: number) {
@@ -446,6 +478,7 @@ export class Game {
     }
     if (this.hideout.open && now - this.lastHideoutRender > 500) this.renderHideout();
     this.updateHud(me);
+    this.rocketFx.update();
     if (myPos) this.mapView.draw(myPos.x, myPos.z, this.controls.yaw);
 
     for (const t of this.tracers) {
