@@ -76,7 +76,7 @@ export class Game {
   private lockedFace = 0;
   private lastShot = 0;
   private spectateIndex = 0;
-  private scoreboardOpen = false;
+  private inventoryOpen = false;
   private disguiseTarget: number | null = null;
   /** A prop in reach that the disguise catalog doesn't unlock yet. */
   private disguiseLocked: number | null = null;
@@ -118,8 +118,8 @@ export class Game {
       this.faceLocked = !this.faceLocked;
       this.lockedFace = this.controls.yaw;
     };
-    this.controls.onScoreboard = (show) => {
-      this.scoreboardOpen = show;
+    this.controls.onInventory = () => {
+      this.inventoryOpen = !this.inventoryOpen;
     };
     this.controls.onPickup = () => {
       if (this.pickupTarget !== null) this.net.send({ t: 'pickup', lootId: this.pickupTarget });
@@ -437,7 +437,14 @@ export class Game {
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme]);
     this.hud.me(me, this.phase);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
-    this.hud.scoreboard(this.scoreboardOpen, [...this.roster.values()], this.latest, this.myId);
+    this.hud.inventory(this.inventoryOpen, {
+      bag: this.bag,
+      capacity: this.bagCapacity,
+      stash: this.profile.stash,
+      players: [...this.roster.values()],
+      visible: this.latest,
+      myId: this.myId,
+    });
 
     if (this.phase === 'end') this.hud.roundEnd(this.winner);
     else if (this.phase === 'countdown') this.hud.center(`라운드 시작까지 ${Math.ceil(left)}`);
