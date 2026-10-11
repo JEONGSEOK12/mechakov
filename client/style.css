@@ -57,7 +57,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
 #damage-flash { position: absolute; inset: 0; box-shadow: inset 0 0 120px rgba(255, 0, 0, 0.7); opacity: 0;
   transition: opacity 0.4s; }
 #damage-flash.show { opacity: 1; transition: none; }
-#inventory { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100% - 32px));
+#inventory { pointer-events: auto; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100% - 32px));
   max-height: calc(100% - 32px); overflow-y: auto; background: rgba(10, 12, 16, 0.9); border-radius: 10px; padding: 16px 20px;
   display: grid; grid-template-columns: 1fr 220px; gap: 8px 28px; }
 #inventory h3 { margin: 0 0 8px; }
@@ -67,6 +67,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
 #inventory .slot { border: 1px solid #333a44; border-left: 4px solid var(--item); background: #161a20; border-radius: 6px;
   padding: 8px; min-height: 52px; display: flex; flex-direction: column; justify-content: space-between; font-size: 14px; }
 #inventory .slot small { color: #9aa; font-variant-numeric: tabular-nums; }
+#inventory .slot.droppable { cursor: pointer; }
+#inventory .slot.droppable:hover { background: #2a1d1d; border-color: #7a3b3b; }
+#inventory .slot.droppable:hover small::after { content: ' · 버리기'; color: #ff8a80; }
 #inventory .slot.empty { border: 1px dashed #333a44; background: transparent; }
 #inventory .muted { color: #9aa; margin: 0 0 16px; }
 #inventory .row { display: flex; justify-content: space-between; gap: 24px; padding: 3px 0; }

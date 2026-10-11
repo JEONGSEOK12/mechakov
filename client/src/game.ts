@@ -141,7 +141,18 @@ export class Game {
     };
     this.controls.onInventory = () => {
       this.inventoryOpen = !this.inventoryOpen;
+      // Free the mouse so bag items can be clicked; click the screen to look around again.
+      if (this.inventoryOpen) document.exitPointerLock();
     };
+    document.getElementById('inventory')!.addEventListener('pointerdown', (e) => {
+      const slot = (e.target as HTMLElement).closest<HTMLElement>('[data-drop]');
+      if (!slot) return;
+      const index = Number(slot.dataset.drop);
+      if (!this.bag[index]) return;
+      this.net.send({ t: 'drop', index });
+      sfx.drop();
+      this.hud.kill(`- ${ITEMS[this.bag[index]].name}`);
+    });
     this.controls.onMute = () => this.hud.kill(toggleMute() ? '소리 끔 (N)' : '소리 켬 (N)');
     this.controls.onMap = () => this.mapView.toggle();
     this.controls.onPickup = () => {
@@ -589,6 +600,7 @@ export class Game {
       players: [...this.roster.values()],
       visible: this.latest,
       myId: this.myId,
+      canDrop: !!me?.alive && (this.phase === 'hide' || this.phase === 'hunt') && !this.map.stations,
     });
 
     const beep = this.phase === 'countdown' && left > 0 ? Math.ceil(left) : 0;

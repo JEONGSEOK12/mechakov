@@ -143,15 +143,16 @@ export class Hud {
     const el = $('inventory');
     el.classList.toggle('hidden', !show);
     if (!show) return;
-    const { bag, capacity, stash, players, visible, myId } = inv;
-    const item = (type: string, count?: number) => {
+    const { bag, capacity, stash, players, visible, myId, canDrop } = inv;
+    const item = (type: string, count?: number, drop?: number) => {
       const def = ITEMS[type];
       const color = `#${def.color.toString(16).padStart(6, '0')}`;
-      return `<div class="slot" style="--item:${color}"><span>${def.name}</span>` +
+      const attrs = drop === undefined ? '' : ` data-drop="${drop}" title="클릭해서 버리기"`;
+      return `<div class="slot${drop === undefined ? '' : ' droppable'}" style="--item:${color}"${attrs}><span>${def.name}</span>` +
         `<small>${count !== undefined ? `×${count} · ` : ''}${def.value * (count ?? 1)}</small></div>`;
     };
     const bagSlots = Array.from({ length: Math.max(capacity, bag.length) }, (_, i) =>
-      bag[i] ? item(bag[i]) : '<div class="slot empty"></div>').join('');
+      bag[i] ? item(bag[i], undefined, canDrop ? i : undefined) : '<div class="slot empty"></div>').join('');
     const bagValue = bag.reduce((s, t) => s + ITEMS[t].value, 0);
     const stashed = Object.entries(stash ?? {}).filter(([, n]) => n > 0).sort(([a], [b]) => ITEMS[b].value - ITEMS[a].value);
     const stashValue = stashed.reduce((s, [t, n]) => s + ITEMS[t].value * n, 0);
@@ -163,7 +164,7 @@ export class Hud {
       `<h3>${title}</h3>` + list.map((p) =>
         `<div class="row ${p.alive ? '' : 'dead'}"><span>${escape(p.name)}${p.id === myId ? ' (나)' : ''}</span><span>${status(p)}</span></div>`,
       ).join('');
-    el.innerHTML =
+    const html =
       `<div class="inv-col"><h3>가방 <small>${bag.length}/${capacity} · 가치 ${bagValue}</small></h3>` +
       `<div class="slots">${bagSlots}</div>` +
       (!stash ? '' : `<h3>보관함 <small>가치 ${stashValue}</small></h3>` +
@@ -172,8 +173,15 @@ export class Hud {
       section('헌터', players.filter((p) => p.role === 'hunter')) +
       section('프롭', players.filter((p) => p.role === 'prop')) +
       section('관전', players.filter((p) => p.role === 'spectator')) +
-      `</div><div class="inv-foot">Tab 닫기</div>`;
+      `</div><div class="inv-foot">${canDrop && bag.length ? '가방 아이템을 클릭하면 바닥에 버려요 · ' : ''}Tab 닫기</div>`;
+    // Only touch the DOM when something changed, so hover and clicks aren't lost every frame.
+    if (html !== this.inventoryHtml) {
+      el.innerHTML = html;
+      this.inventoryHtml = html;
+    }
   }
+
+  private inventoryHtml = '';
 }
 
 interface InventoryView {
@@ -184,6 +192,8 @@ interface InventoryView {
   players: RosterEntry[];
   visible: Map<number, PlayerSnap>;
   myId: number;
+  /** Bag items can be dropped (alive, mid-raid). */
+  canDrop: boolean;
 }
 
 export function resultText(outcome: Outcome, items: string[]) {
