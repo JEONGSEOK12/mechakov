@@ -21,6 +21,7 @@ export class Controls {
   onHideout: () => void = () => {};
   onAddBot: () => void = () => {};
   onMute: () => void = () => {};
+  onMap: () => void = () => {};
   onToggleRotationLock: () => void = () => {};
   onInventory: () => void = () => {};
 
@@ -82,7 +83,8 @@ export class Controls {
       case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
       case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
       case 'KeyB': if (down && !e.repeat) this.onAddBot(); break;
-      case 'KeyM': if (down && !e.repeat) this.onMute(); break;
+      case 'KeyM': if (down && !e.repeat) this.onMap(); break;
+      case 'KeyN': if (down && !e.repeat) this.onMute(); break;
       case 'Tab': if (down && !e.repeat) this.onInventory(); break;
       default: return;
     }

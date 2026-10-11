@@ -4,7 +4,7 @@ import type { GameMap, Station } from '../../shared/map.ts';
 import type { Box, Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
 import type { Theme } from '../../shared/props.ts';
-import { containerModel, propModel, rackModel } from './models.ts';
+import { containerModel, fenceModel, floorStripes, propModel, rackModel } from './models.ts';
 
 /** One tile per 2 m of floor. */
 function floorTexture(base: string, half: number): THREE.Texture {
@@ -114,6 +114,52 @@ function createLabel(text: string): THREE.Sprite {
   return sprite;
 }
 
+/**
+ * Aisle signs on both ends of each rack ("A-1", "B-3"): a letter per row line
+ * and a number per rack along it, like a real warehouse's location codes.
+ */
+function rackSigns(racks: Box[]): THREE.Group {
+  const group = new THREE.Group();
+  const alongZ = (w: Box) => w.max[2] - w.min[2] > w.max[0] - w.min[0];
+  const line = (w: Box) => `${alongZ(w) ? 'z' : 'x'}${Math.round(alongZ(w) ? w.min[0] + w.max[0] : w.min[2] + w.max[2])}`;
+  const lines = [...new Set(racks.map(line))].sort((a, b) => (a[0] === b[0] ? Number(a.slice(1)) - Number(b.slice(1)) : a < b ? 1 : -1));
+  const geo = new THREE.PlaneGeometry(0.9, 0.45);
+  for (const w of racks) {
+    const li = lines.indexOf(line(w));
+    const same = racks.filter((o) => line(o) === line(w)).sort((a, b) => (alongZ(w) ? a.min[2] - b.min[2] : a.min[0] - b.min[0]));
+    const text = `${String.fromCharCode(65 + (li % 26))}-${same.indexOf(w) + 1}`;
+    const c = document.createElement('canvas');
+    c.width = 128;
+    c.height = 64;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#f2c230';
+    g.fillRect(0, 0, 128, 64);
+    g.fillStyle = '#16181b';
+    g.fillRect(4, 4, 120, 56);
+    g.fillStyle = '#f2c230';
+    g.font = 'bold 34px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 64, 34);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+    for (const end of [0, 1]) {
+      const sign = new THREE.Mesh(geo, mat);
+      const cx = (w.min[0] + w.max[0]) / 2;
+      const cz = (w.min[2] + w.max[2]) / 2;
+      if (alongZ(w)) {
+        sign.position.set(cx, w.max[1] + 0.3, end ? w.max[2] + 0.02 : w.min[2] - 0.02);
+      } else {
+        sign.position.set(end ? w.max[0] + 0.02 : w.min[0] - 0.02, w.max[1] + 0.3, cz);
+        sign.rotation.y = Math.PI / 2;
+      }
+      group.add(sign);
+    }
+  }
+  return group;
+}
+
 /** Builds a map's static scene into `root` (cleared first). */
 export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap): World {
   root.clear();
@@ -157,13 +203,16 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const innerMats = pal.inner.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 }));
   // Warehouse shelving and yard containers get detailed models; other walls are plain boxes.
   const thin = (w: Box) => Math.min(w.max[0] - w.min[0], w.max[2] - w.min[2]);
-  const isRack = (w: Box) => map.theme === 'warehouse' && w.max[1] === 3.2 && thin(w) <= 1.3;
+  const isRack = (w: Box) => map.theme === 'warehouse' && [2.4, 3.2, 4.2].includes(w.max[1]) && thin(w) <= 1.3 && thin(w) > 0.5;
+  const isFence = (w: Box) => map.theme === 'warehouse' && w.max[1] === 2.5 && thin(w) <= 0.31;
   const isContainer = (w: Box) => map.theme === 'yard' && w.max[1] > 2 && w.max[1] < map.wallHeight + 2 && Math.abs(thin(w) - 2.4) < 0.01;
   const racks = map.walls.filter(isRack);
   const containers = map.walls.filter(isContainer);
+  const fences = map.walls.filter(isFence);
   for (const [geo, mat] of [
     [racks.length ? rackModel(racks, map.seed) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 })],
     [containers.length ? containerModel(containers, pal.inner) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 })],
+    [fences.length ? fenceModel(fences) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.5 })],
   ] as const) {
     if (!geo) continue;
     const mesh = new THREE.Mesh(geo, mat);
@@ -173,7 +222,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
     colliders.push(mesh);
   }
   map.walls.forEach((w, i) => {
-    if (isRack(w) || isContainer(w)) return;
+    if (isRack(w) || isContainer(w) || isFence(w)) return;
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
     const mat = size[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
@@ -183,6 +232,12 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
     root.add(mesh);
     colliders.push(mesh);
   });
+  if (racks.length) {
+    const stripes = new THREE.Mesh(floorStripes(racks), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 }));
+    stripes.receiveShadow = true;
+    root.add(stripes);
+    root.add(rackSigns(racks));
+  }
 
   // One instanced mesh per prop type: maps have hundreds of props.
   const byType = new Map<string, typeof map.props>();

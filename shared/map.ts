@@ -64,24 +64,47 @@ const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher'];
 const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier', 'wheelbarrow', 'pipes', 'paintCan'];
 
 /**
- * A big warehouse: rows of shelving racks fill the hall so you can't see far
- * down it, with cross racks breaking up the aisles. A walled office block sits
+ * A big warehouse: rows of shelving fill the hall so you can't see far down
+ * it, with cross racks breaking up the aisles. Different areas store things
+ * differently: general shelving in the middle, tall pallet racking in the
+ * east, a fenced small-parts cage and stacked bulk freight in the west. A walled office block sits
  * in one corner (open office, manager's office, break room), a workshop on the
  * west side and a loading dock along the south wall behind a row of racks.
  */
 function warehouse(b: Builder) {
   const h = b.half;
+  /**
+   * Three kinds of shelving, told apart by height (the client draws each its own way):
+   * general shelving, tall pallet racking, and low small-parts shelving.
+   */
+  const KINDS = {
+    general: { height: 3.2, floor: STORAGE, fill: 0.3 },
+    pallet: { height: 4.2, floor: ['pallet', 'forkPallet', 'pallet', 'crate'], fill: 0.35 },
+    parts: { height: 2.4, floor: ['smallBox', 'toolbox', 'paintCan', 'archiveBox', 'bucket'], fill: 0.35 },
+  };
+  type Kind = keyof typeof KINDS;
   /** A rack along z at `x`, with goods on the floor along both sides. */
-  const rack = (x: number, z0: number, z1: number, fill = 0.4) => {
-    b.wall(x - 0.6, z0, x + 0.6, z1, 3.2);
-    b.line(STORAGE, x - 1.3, z0 + 0.9, x - 1.3, z1 - 0.9, 1.8, fill, 1);
-    b.line(STORAGE, x + 1.3, z0 + 0.9, x + 1.3, z1 - 0.9, 1.8, fill, 3);
+  const rack = (x: number, z0: number, z1: number, kind: Kind = 'general') => {
+    const k = KINDS[kind];
+    b.wall(x - 0.6, z0, x + 0.6, z1, k.height);
+    b.line(k.floor, x - 1.3, z0 + 0.9, x - 1.3, z1 - 0.9, 1.8, k.fill, 1);
+    b.line(k.floor, x + 1.3, z0 + 0.9, x + 1.3, z1 - 0.9, 1.8, k.fill, 3);
   };
   /** A rack along x at `z`. */
-  const rackX = (z: number, x0: number, x1: number, fill = 0.4) => {
-    b.wall(x0, z - 0.6, x1, z + 0.6, 3.2);
-    b.line(STORAGE, x0 + 0.9, z - 1.3, x1 - 0.9, z - 1.3, 1.8, fill, 2);
-    b.line(STORAGE, x0 + 0.9, z + 1.3, x1 - 0.9, z + 1.3, 1.8, fill, 0);
+  const rackX = (z: number, x0: number, x1: number, kind: Kind = 'general') => {
+    const k = KINDS[kind];
+    b.wall(x0, z - 0.6, x1, z + 0.6, k.height);
+    b.line(k.floor, x0 + 0.9, z - 1.3, x1 - 0.9, z - 1.3, 1.8, k.fill, 2);
+    b.line(k.floor, x0 + 0.9, z + 1.3, x1 - 0.9, z + 1.3, 1.8, k.fill, 0);
+  };
+  /** A row of crate stacks, one to three high. */
+  const stacks = (x: number, z0: number, z1: number) => {
+    for (let z = z0; z <= z1; z += 1.15) {
+      if (!b.chance(0.85)) continue;
+      let box = b.prop('crate', x, z);
+      const high = b.chance(0.5) ? 3 : b.chance(0.7) ? 2 : 1;
+      for (let i = 1; i < high && box; i++) box = b.onTop(box, 'crate');
+    }
   };
 
   b.zone('보관 창고', -h, -h, h, 34);
@@ -119,32 +142,44 @@ function warehouse(b: Builder) {
   b.line(['tire', 'tire', 'spool', 'barrel'], -33, -22, -33, -18, 1.2, 0.8, 3);
   b.cluster(['generator', 'toolbox', 'spool'], -41, -14, 2, 3);
 
-  // Shelving: rows of racks in the hall, three long blocks per row with cross aisles between.
-  for (const x of [-45, -40, -35]) rack(x, -42, -28);
-  for (const x of [-45, -40, -35]) rack(x, 10, 29);
+  // Small-parts cage in the north-west: low shelving behind wire fencing.
+  b.zone('부품 창고', -47, -45, -31, -26);
+  b.room(-47, -45, -31, -26, { e: [-35.5], s: [-39] }, 2.5);
+  for (const x of [-44, -40, -36]) rack(x, -43, -29, 'parts');
+
+  // General shelving fills the middle of the hall, three blocks per row with cross aisles between.
   for (const x of [-27, -22, -17, -12, 12, 17]) {
     rack(x, -46, -30);
     rack(x, -25, -10);
     rack(x, 10, 29);
   }
-  for (const x of [25, 31, 37, 43]) {
-    rack(x, -21, -9);
-    rack(x, 10, 29);
-  }
-  // Cross racks in the middle aisle so it isn't one long open lane.
   rackX(0, -31, -9.5);
   rackX(0, 9.5, 21);
-  rackX(0, 27, 46);
   rack(-38, -5, 5);
-  rack(24, -5, 5, 0.3);
-  rackX(-27.5, -9, 9, 0.3);
+  rackX(-27.5, -9, 9);
+  rackX(-40, -8, 8);
+  rackX(-17, -8, 8);
+  rackX(17, -8, 8);
+  rack(0, 21, 29);
+
+  // Tall pallet racking in the east hall.
+  b.zone('팔레트 랙', 20, -25, h, 33);
+  for (const x of [25, 31, 37, 43]) {
+    rack(x, -21, -9, 'pallet');
+    rack(x, 10, 29, 'pallet');
+  }
+  rackX(0, 27, 46, 'pallet');
+  rack(24, -5, 5, 'pallet');
+
+  // Bulk freight in the south-west: crates stacked in rows.
+  b.zone('대형 화물', -48, 8, -33, 31);
+  for (const x of [-45, -41, -37]) {
+    stacks(x, 10, 18.5);
+    stacks(x, 21, 29);
+  }
+
   // Racks between the hall and the dock, with ways through.
-  for (const [x0, x1] of [[-46, -30], [-26, -10], [10, 26], [30, 46]]) rackX(33, x0, x1, 0.3);
-  // And across the wide middle aisle, short of the open spot in the centre.
-  rackX(-40, -8, 8, 0.3);
-  rackX(-17, -8, 8, 0.3);
-  rackX(17, -8, 8, 0.3);
-  rack(0, 21, 29, 0.3);
+  for (const [x0, x1] of [[-46, -30], [-26, -10], [10, 26], [30, 46]]) rackX(33, x0, x1, x0 > 0 ? 'pallet' : 'general');
 
   // Loading dock along the south wall, between the exits.
   b.zone('하역장', -h, 34, h, h);
