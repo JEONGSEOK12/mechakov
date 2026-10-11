@@ -103,3 +103,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
 .upgrade .effect { color: #aaa; }
 .upgrade .cost span { margin-right: 8px; }
 .upgrade .cost .missing { color: #ff7a7a; }
+
+#mapview { position: absolute; inset: 0; margin: auto; width: min(86vh, calc(100% - 32px)); height: fit-content;
+  padding: 12px; background: rgba(12, 14, 18, 0.92); border: 1px solid #333a44; border-radius: 10px; }
+#mapview canvas { display: block; width: 100%; height: auto; border-radius: 6px; }
+#mapview .mapview-title { font-weight: 700; margin-bottom: 8px; }
+#mapview .mapview-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 13px; color: #9aa3ad; }
+#mapview .k-me { color: #ffd23f; }
+#mapview .k-exit { color: #3ddc84; }
+#mapview .k-wall { color: #9aa3ad; }
+#mapview .k-prop { color: #6f6656; }

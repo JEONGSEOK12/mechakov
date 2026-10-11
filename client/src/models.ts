@@ -618,16 +618,28 @@ export function propModel(type: string): THREE.BufferGeometry {
 
 export const hasModel = (type: string) => type in MODELS;
 
+/** How a rack wall is drawn, from its height: tall pallet racking, general shelving or small-parts shelving. */
+export type RackStyle = 'pallet' | 'general' | 'parts';
+export const rackStyle = (height: number): RackStyle => (height >= 4 ? 'pallet' : height <= 2.6 ? 'parts' : 'general');
+
+/** Upright and beam colors for general shelving, one pair per row so rows look like they came from different orders. */
+const GENERAL_FRAMES: [number, number][] = [[0xd8742a, 0x2f6db5], [0x3a8f4e, 0xe0b020], [0x7a838c, 0xc0392b], [0x2f6db5, 0xd8742a]];
+/** What a row of general shelving holds. */
+const GENERAL_GOODS: { colors: number[]; drums: number }[] = [
+  { colors: [0xc8a26b, 0xb8925b, 0xd6b47c, 0x9c7a4c], drums: 0 }, // cartons
+  { colors: [0x3d6e8f, 0x2e5a75, 0xc0392b], drums: 0.7 }, // drums and chemicals
+  { colors: [0xd8c9a0, 0xc9b98a, 0xe6dcc0], drums: 0 }, // sacks
+  { colors: [0xc8a26b, 0x3d6e8f, 0xd8c9a0, 0x7d8f69, 0xe6e2d8], drums: 0.15 }, // mixed
+];
+const BINS = [0x2a6fdb, 0x2a6fdb, 0xc0392b, 0xe0b020, 0x7a838c, 0x3a8f4e];
+
 /**
- * Warehouse shelving: steel racks with shelves of goods on both sides and a
- * mesh panel down the middle, one merged geometry for all racks on a map.
+ * Warehouse shelving, one merged geometry for every rack on a map. Each rack's
+ * style comes from its height (see `rackStyle`), and general shelving varies
+ * its frame color and goods by row, so the hall doesn't repeat one rack.
  */
 export function rackModel(walls: Box[], seed: number): THREE.BufferGeometry {
   const p = new Parts();
-  const r = rng(seed);
-  const upright = 0xd8742a;
-  const beam = 0x2f6db5;
-  const goods = [0xc8a26b, 0xb8925b, 0x9c6b3c, 0x3d6e8f, 0xd8c9a0, 0x7d8f69, 0xe6e2d8];
   for (const w of walls) {
     const alongZ = w.max[2] - w.min[2] > w.max[0] - w.min[0];
     const len = alongZ ? w.max[2] - w.min[2] : w.max[0] - w.min[0];
@@ -635,6 +647,7 @@ export function rackModel(walls: Box[], seed: number): THREE.BufferGeometry {
     const h = w.max[1];
     const cx = (w.min[0] + w.max[0]) / 2;
     const cz = (w.min[2] + w.max[2]) / 2;
+    const r = rng(seed + Math.round(cx * 7 + cz * 131));
     // Local (u along the rack, v across it) to world.
     const at = (u: number, v: number): [number, number] => (alongZ ? [cx + v, cz + u] : [cx + u, cz + v]);
     const box = (lu: number, hy: number, lv: number, u: number, y: number, v: number, color: number) => {
@@ -642,49 +655,142 @@ export function rackModel(walls: Box[], seed: number): THREE.BufferGeometry {
       if (alongZ) p.box(lv, hy, lu, x, y, z, color);
       else p.box(lu, hy, lv, x, y, z, color);
     };
-    const bays = Math.max(1, Math.round(len / 2.5));
+    const style = rackStyle(h);
+    // Rows share a frame and goods: pick by the row's line, not the segment.
+    const row = Math.abs(Math.round(alongZ ? cx : cz));
+    const [upright, beam] = style === 'pallet' ? [0x2f5fa5, 0xe8742a] : style === 'parts' ? [0xa7b0b8, 0xa7b0b8] : GENERAL_FRAMES[row % GENERAL_FRAMES.length];
+    const bayLen = style === 'pallet' ? 2.7 : style === 'parts' ? 1.1 : 2.5;
+    const bays = Math.max(1, Math.round(len / bayLen));
     const bay = len / bays;
-    const levels = [0.1, 1.1, 2.1, h - 0.08];
-    box(len - 0.1, h - 0.1, 0.04, 0, 0.05, 0, 0x3a3f44);
+    const levels = style === 'pallet' ? [0, 1.45, 2.85, h - 0.1] : style === 'parts' ? [0.1, 0.55, 1.0, 1.45, 1.9, h - 0.05] : [0.1, 1.1, 2.1, h - 0.08];
+    const gd = depth / 2 - 0.12;
+
+    box(len - 0.1, h - 0.1, 0.04, 0, 0.05, 0, style === 'parts' ? 0x8e969c : 0x3a3f44);
     for (let i = 0; i <= bays; i++) {
       const u = -len / 2 + i * bay + (i === 0 ? 0.05 : i === bays ? -0.05 : 0);
-      for (const sv of [-1, 1]) box(0.08, h, 0.08, u, 0, (sv * (depth - 0.08)) / 2, upright);
+      const t = style === 'parts' ? 0.05 : 0.09;
+      for (const sv of [-1, 1]) {
+        box(t, h, t, u, 0, (sv * (depth - t)) / 2, upright);
+        // Yellow-and-black guards at the foot of pallet rack uprights.
+        if (style === 'pallet') box(0.14, 0.4, 0.14, u, 0, (sv * (depth - 0.14)) / 2, i % 2 ? 0xe0b020 : 0x1c1d20);
+      }
+      if (style !== 'parts') for (let y = 0.4; y < h - 0.3; y += 0.9) box(0.03, 0.03, depth - 0.1, u, y, 0, upright);
     }
     for (const y of levels) {
-      for (const sv of [-1, 1]) box(len, 0.08, 0.05, 0, y, (sv * (depth - 0.05)) / 2, beam);
-      box(len - 0.1, 0.03, depth - 0.1, 0, y + 0.05, 0, 0x8e969c);
+      if (style === 'pallet' && y === 0) continue;
+      for (const sv of [-1, 1]) box(len, style === 'pallet' ? 0.12 : 0.07, 0.05, 0, y, (sv * (depth - 0.05)) / 2, beam);
+      box(len - 0.1, 0.03, depth - 0.1, 0, y + 0.04, 0, style === 'parts' ? 0xb8c0c8 : 0x8e969c);
     }
+
+    const goods = GENERAL_GOODS[(row * 7 + Math.abs(Math.round(alongZ ? cz : cx))) % GENERAL_GOODS.length];
     for (let i = 0; i < bays; i++) {
       const u0 = -len / 2 + i * bay;
       for (let li = 0; li < levels.length - 1; li++) {
-        const y = levels[li] + 0.08;
-        const space = levels[li + 1] - y - 0.08;
+        const y = levels[li] + (style === 'pallet' && li === 0 ? 0 : 0.07);
+        const space = levels[li + 1] - y - 0.1;
         for (const sv of [-1, 1]) {
-          let u = u0 + 0.12;
-          while (u < u0 + bay - 0.4) {
-            const gw = 0.35 + r() * 0.5;
-            if (u + gw > u0 + bay - 0.1) break;
-            if (r() < 0.2) {
+          const v = sv * (gd / 2 + 0.06);
+          if (style === 'pallet') {
+            // Two pallets per bay, each with a load: cartons, wrapped goods or drums.
+            for (let k = 0; k < 2; k++) {
+              if (r() < 0.18) continue;
+              const u = u0 + bay * (k ? 0.73 : 0.27);
+              box(1.0, 0.12, gd, u, y, v, 0xb08850);
+              const load = r();
+              const lh = Math.min(space - 0.12, 0.7 + r() * 0.5);
+              if (load < 0.5) {
+                for (let a = 0; a < 2; a++) for (let c = 0; c < 2; c++) box(0.46, lh * (0.8 + r() * 0.2), gd / 2 - 0.03, u - 0.24 + a * 0.48, y + 0.12, v - gd / 4 + c * (gd / 2), shade(0xc8a26b, 0.85 + r() * 0.3));
+              } else if (load < 0.8) {
+                box(0.96, lh, gd - 0.04, u, y + 0.12, v, shade(0xdfe4e8, 0.85 + r() * 0.15));
+                box(0.97, 0.05, gd - 0.03, u, y + 0.12 + lh * 0.5, v, 0xc0392b);
+              } else {
+                for (let a = 0; a < 2; a++) for (let c = 0; c < 2; c++) {
+                  const [x, z] = at(u - 0.24 + a * 0.48, v - gd / 4 + c * (gd / 2));
+                  p.cyl(0.22, Math.min(lh, 0.9), x, y + 0.12, z, 0x3d6e8f, 0.22, 10);
+                }
+              }
+            }
+          } else if (style === 'parts') {
+            // Plastic bins in a row, with a white label on each.
+            let u = u0 + 0.08;
+            while (u < u0 + bay - 0.3) {
+              const bw = 0.28 + r() * 0.14;
+              if (u + bw > u0 + bay - 0.05) break;
+              if (r() < 0.15) {
+                u += bw;
+                continue;
+              }
+              const bh = Math.min(space, 0.18 + r() * 0.12);
+              const col = r() < 0.2 ? 0xc8a26b : BINS[Math.floor(r() * BINS.length)];
+              box(bw - 0.03, bh, gd, u + bw / 2, y, v, col);
+              box(bw * 0.5, 0.05, 0.005, u + bw / 2, y + bh * 0.45, sv * (gd + 0.065), 0xf2f2ee);
+              u += bw;
+            }
+          } else {
+            let u = u0 + 0.12;
+            while (u < u0 + bay - 0.4) {
+              const gw = 0.35 + r() * 0.5;
+              if (u + gw > u0 + bay - 0.1) break;
+              if (r() < 0.2) {
+                u += gw;
+                continue;
+              }
+              const gh = Math.min(space, 0.3 + r() * 0.55);
+              const col = goods.colors[Math.floor(r() * goods.colors.length)];
+              if (r() < goods.drums) {
+                const [x, z] = at(u + 0.2, v);
+                p.cyl(0.18, Math.min(space, 0.55 + r() * 0.3), x, y, z, col, 0.18, 10);
+                u += 0.42;
+                continue;
+              }
+              box(gw - 0.04, gh, gd, u + gw / 2, y, v, col);
+              if (gh < space - 0.3 && r() < 0.5) box(gw * 0.6, Math.min(0.25, space - gh - 0.02), gd * 0.8, u + gw / 2, y + gh, v, shade(col, 1.1));
               u += gw;
-              continue;
             }
-            const gh = Math.min(space, 0.3 + r() * 0.55);
-            const gd = depth / 2 - 0.12;
-            const v = sv * (gd / 2 + 0.06);
-            const col = goods[Math.floor(r() * goods.length)];
-            if (r() < 0.15) {
-              const [x, z] = at(u + 0.2, v);
-              p.cyl(0.18, Math.min(space, 0.55), x, y, z, 0x3d6e8f);
-              u += 0.42;
-              continue;
-            }
-            box(gw - 0.04, gh, gd, u + gw / 2, y, v, col);
-            if (gh < space - 0.3 && r() < 0.5) box(gw * 0.6, Math.min(0.25, space - gh - 0.02), gd * 0.8, u + gw / 2, y + gh, v, shade(col, 1.1));
-            u += gw;
           }
         }
       }
     }
+  }
+  return p.merge();
+}
+
+/** Yellow safety lines on the floor along both sides of each rack. */
+export function floorStripes(walls: Box[]): THREE.BufferGeometry {
+  const p = new Parts();
+  for (const w of walls) {
+    const alongZ = w.max[2] - w.min[2] > w.max[0] - w.min[0];
+    for (const side of [-1, 1]) {
+      if (alongZ) {
+        const x = side < 0 ? w.min[0] - 0.25 : w.max[0] + 0.25;
+        p.box(0.1, 0.01, w.max[2] - w.min[2] + 0.5, x, 0.004, (w.min[2] + w.max[2]) / 2, 0xe0b020);
+      } else {
+        const z = side < 0 ? w.min[2] - 0.25 : w.max[2] + 0.25;
+        p.box(w.max[0] - w.min[0] + 0.5, 0.01, 0.1, (w.min[0] + w.max[0]) / 2, 0.004, z, 0xe0b020);
+      }
+    }
+  }
+  return p.merge();
+}
+
+/** Wire-mesh fencing (a locked parts cage): posts, rails and a fine grid of wires. */
+export function fenceModel(walls: Box[]): THREE.BufferGeometry {
+  const p = new Parts();
+  for (const w of walls) {
+    const alongZ = w.max[2] - w.min[2] > w.max[0] - w.min[0];
+    const len = alongZ ? w.max[2] - w.min[2] : w.max[0] - w.min[0];
+    const h = w.max[1];
+    const cx = (w.min[0] + w.max[0]) / 2;
+    const cz = (w.min[2] + w.max[2]) / 2;
+    const box = (lu: number, hy: number, lv: number, u: number, y: number, color: number) => {
+      if (alongZ) p.box(lv, hy, lu, cx, y, cz + u, color);
+      else p.box(lu, hy, lv, cx + u, y, cz, color);
+    };
+    const posts = Math.max(1, Math.round(len / 2));
+    for (let i = 0; i <= posts; i++) box(0.07, h, 0.07, -len / 2 + (i * len) / posts, 0, 0x6a737d);
+    for (const y of [0.05, h / 2, h - 0.06]) box(len, 0.05, 0.05, 0, y, 0x6a737d);
+    for (let u = -len / 2 + 0.12; u < len / 2; u += 0.12) box(0.012, h - 0.1, 0.012, u, 0.05, 0x9aa3ad);
+    for (let y = 0.2; y < h - 0.1; y += 0.15) box(len, 0.012, 0.012, 0, y, 0x9aa3ad);
   }
   return p.merge();
 }

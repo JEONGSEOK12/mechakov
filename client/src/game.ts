@@ -13,6 +13,7 @@ import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
+import { MapView } from './mapview.ts';
 import { sfx, toggleMute } from './sfx.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
@@ -89,6 +90,7 @@ export class Game {
   private lastShot = 0;
   private spectateIndex = 0;
   private inventoryOpen = false;
+  private mapView = new MapView(document.getElementById('hud')!);
   private disguiseTarget: number | null = null;
   /** A prop in reach that the disguise catalog doesn't unlock yet. */
   private disguiseLocked: number | null = null;
@@ -112,6 +114,7 @@ export class Game {
     this.scene.add(this.worldRoot);
     this.map = generateMap(seed, theme);
     this.world = buildWorld(this.scene, this.worldRoot, this.map);
+    this.mapView.setMap(this.map);
     sfx.ambience(theme === 'yard');
     this.highlight.visible = false;
     this.scene.add(this.highlight);
@@ -136,7 +139,8 @@ export class Game {
     this.controls.onInventory = () => {
       this.inventoryOpen = !this.inventoryOpen;
     };
-    this.controls.onMute = () => this.hud.kill(toggleMute() ? '소리 끔 (M)' : '소리 켬 (M)');
+    this.controls.onMute = () => this.hud.kill(toggleMute() ? '소리 끔 (N)' : '소리 켬 (N)');
+    this.controls.onMap = () => this.mapView.toggle();
     this.controls.onPickup = () => {
       if (this.pickupTarget !== null && this.bag.length >= this.bagCapacity) sfx.bagFull();
       if (this.pickupTarget !== null) this.net.send({ t: 'pickup', lootId: this.pickupTarget });
@@ -207,6 +211,7 @@ export class Game {
         if (this.map.theme === 'hideout' && msg.theme !== 'hideout') sfx.raidStart();
         this.map = generateMap(msg.seed, msg.theme);
         this.world = buildWorld(this.scene, this.worldRoot, this.map);
+        this.mapView.setMap(this.map);
         this.faceLocked = false;
         sfx.ambience(msg.theme === 'yard');
         break;
@@ -441,6 +446,7 @@ export class Game {
     }
     if (this.hideout.open && now - this.lastHideoutRender > 500) this.renderHideout();
     this.updateHud(me);
+    if (myPos) this.mapView.draw(myPos.x, myPos.z, this.controls.yaw);
 
     for (const t of this.tracers) {
       if (now > t.until) {

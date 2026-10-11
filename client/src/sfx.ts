@@ -1,7 +1,7 @@
 /**
  * Sound effects made on the fly with Web Audio, so the game ships no audio
  * files. The context starts on the first click or key press (browsers block
- * sound before that). M toggles mute, remembered in this browser.
+ * sound before that). N toggles mute, remembered in this browser.
  */
 
 const MUTE_KEY = 'mechakov:muted';
