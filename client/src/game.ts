@@ -442,7 +442,9 @@ export class Game {
     if (this.phase === 'end') this.hud.roundEnd(this.winner);
     else if (this.phase === 'countdown') this.hud.center(`라운드 시작까지 ${Math.ceil(left)}`);
     else if (this.phase === 'hide' && me?.role === 'prop' && me.alive) {
-      this.hud.center(left > 5 ? '헌터가 오기 전에 숨으세요!' : `헌터 출발까지 ${Math.ceil(left)}`);
+      const huntersComing = [...this.roster.values()].some((p) => p.role === 'hunter');
+      if (!huntersComing) this.hud.center(left > 25 ? '아이템을 챙겨 초록 탈출구로 가세요' : '');
+      else this.hud.center(left > 5 ? '헌터가 오기 전에 숨으세요!' : `헌터 출발까지 ${Math.ceil(left)}`);
     }
     else this.hud.center('');
 

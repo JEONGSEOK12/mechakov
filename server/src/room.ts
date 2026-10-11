@@ -112,6 +112,8 @@ export class Room {
   private nextId = 1;
   private nextLootId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Off for solo practice: everyone is a prop and the round is just loot and extract. */
+  hunters = true;
 
   constructor(
     readonly name: string,
@@ -277,7 +279,9 @@ export class Room {
   }
 
   private updateExtraction(p: Player) {
-    if (this.phase !== 'hunt' || p.role !== 'prop' || !this.map.exits.some((e) => inBox(p.body.pos, e))) {
+    // With no hunters there is nothing to wait for, so exits open from the start.
+    const open = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
+    if (!open || p.role !== 'prop' || !this.map.exits.some((e) => inBox(p.body.pos, e))) {
       p.extractTime = 0;
       return;
     }
@@ -304,7 +308,7 @@ export class Room {
       case 'hunt': {
         const living = (role: Role) => [...this.players.values()].filter((p) => p.role === role && p.alive).length;
         if (living('prop') === 0) this.endRound('noProps');
-        else if (living('hunter') === 0) this.endRound('noHunters');
+        else if (this.hunters && living('hunter') === 0) this.endRound('noHunters');
         else if (expired && this.phase === 'hide') this.setPhase('hunt', this.timings.hunt);
         else if (expired) this.endRound('time');
         break;
@@ -355,7 +359,7 @@ export class Room {
   private startRound() {
     // Bots only play props, so hunters come from the people in the room.
     const all = [...shuffle(this.humans), ...shuffle([...this.players.values()].filter((p) => p.bot))];
-    const hunterCount = Math.min(this.humans.length, Math.max(1, Math.round(all.length / 4)));
+    const hunterCount = !this.hunters ? 0 : Math.min(this.humans.length, Math.max(1, Math.round(all.length / 4)));
     const propSpawns = shuffle(this.map.propSpawns);
     all.forEach((p, i) => {
       p.alive = true;
