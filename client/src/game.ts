@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_COOLDOWN, TICK_DT } from '../../shared/constants.ts';
+import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_COOLDOWN, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
@@ -378,8 +378,11 @@ export class Game {
     this.lastRocket = now;
     const p = this.camera.position;
     this.net.send({ t: 'rocket', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
-    sfx.rocketFire();
-    this.shake(0.05, 100);
+    // The server launches it after a short wind-up; the whoosh matches.
+    setTimeout(() => {
+      sfx.rocketFire();
+      this.shake(0.05, 100);
+    }, ROCKET_DELAY * 1000);
   }
 
   private addTracer(from: Vec3, to: Vec3, color: number) {

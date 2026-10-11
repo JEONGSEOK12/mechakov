@@ -51,7 +51,9 @@ export const DISGUISE_RANGE = 4;
 export const ROCKET_SPEED = 20;
 export const ROCKET_COOLDOWN = 1.4;
 export const ROCKET_LIFETIME = 4;
-export const ROCKET_RADIUS = 3.2;
+export const ROCKET_RADIUS = 2.4;
+/** A short wind-up between clicking and the rocket leaving, in seconds. */
+export const ROCKET_DELAY = 0.15;
 /** Most damage (to hunters only), at the centre of the blast. */
 export const ROCKET_DAMAGE = 18;
 /** Knockback speed at the centre of the blast, in m/s. */

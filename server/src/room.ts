@@ -1,7 +1,7 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_COOLDOWN, ROCKET_DAMAGE, ROCKET_KNOCKBACK, ROCKET_LIFETIME,
-  ROCKET_RADIUS, ROCKET_SPEED, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  ROCKET_DELAY, ROCKET_RADIUS, ROCKET_SPEED, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
@@ -35,6 +35,8 @@ export class Player {
   inputs: InputMsg[] = [];
   lastShot = -Infinity;
   lastRocket = -Infinity;
+  /** A rocket winding up: where it starts relative to the prop's centre, its direction and when it leaves. */
+  pendingRocket: { offset: Vec3; dir: Vec3; at: number } | null = null;
   /** Items picked up this raid; lost on death. */
   bag: string[] = [];
   extractTime = 0;
@@ -264,6 +266,7 @@ export class Room {
       }
       this.updateExtraction(p);
     }
+    this.launchRockets();
     this.moveRockets();
 
     this.sendSnapshots();
@@ -385,6 +388,7 @@ export class Room {
   private spawnLoot() {
     this.loot.clear();
     this.rockets.clear();
+    for (const p of this.players.values()) p.pendingRocket = null;
     const total = ITEM_TYPES.reduce((s, k) => s + ITEMS[k].weight, 0);
     const count = 16 + 4 * this.players.size;
     for (const pos of shuffle(this.map.lootSpots).slice(0, count)) {
@@ -455,6 +459,7 @@ export class Room {
     this.setPhase('end', this.timings.end);
     this.loot.clear();
     this.rockets.clear();
+    for (const p of this.players.values()) p.pendingRocket = null;
     this.broadcast({ t: 'loot', items: [] });
     this.broadcast({ t: 'roundEnd', winner });
   }
@@ -472,6 +477,7 @@ export class Room {
 
   private changeMap(theme: Theme) {
     this.rockets.clear();
+    for (const p of this.players.values()) p.pendingRocket = null;
     if (this.map.theme !== 'hideout') this.lastRaid = this.map.theme;
     this.map = generateMap(Math.floor(Math.random() * 1e9), theme);
     this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
@@ -580,10 +586,24 @@ export class Room {
     p.lastRocket = this.time;
     // Start on the camera ray where it passes the prop, so it flies at the crosshair.
     const along = Math.max(0, (center[0] - origin[0]) * dir[0] + (center[1] - origin[1]) * dir[1] + (center[2] - origin[2]) * dir[2]);
-    const pos: Vec3 = [origin[0] + dir[0] * along, origin[1] + dir[1] * along, origin[2] + dir[2] * along];
-    const vel: Vec3 = [dir[0] * ROCKET_SPEED, dir[1] * ROCKET_SPEED, dir[2] * ROCKET_SPEED];
-    const id = this.nextRocketId++;
-    this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time });
+    const offset: Vec3 = [origin[0] + dir[0] * along - center[0], origin[1] + dir[1] * along - center[1], origin[2] + dir[2] * along - center[2]];
+    p.pendingRocket = { offset, dir, at: this.time + ROCKET_DELAY };
+  }
+
+  /** Rockets leave after their wind-up, from wherever the prop has moved to. */
+  private launchRockets() {
+    for (const p of this.players.values()) {
+      const pending = p.pendingRocket;
+      if (!pending || this.time < pending.at - 1e-6) continue;
+      p.pendingRocket = null;
+      if (!p.alive || p.role !== 'prop' || this.phase === 'end') continue;
+      const size = bodySize(p.role, p.prop);
+      const { offset, dir } = pending;
+      const pos: Vec3 = [p.body.pos[0] + offset[0], p.body.pos[1] + size[1] / 2 + offset[1], p.body.pos[2] + offset[2]];
+      const vel: Vec3 = [dir[0] * ROCKET_SPEED, dir[1] * ROCKET_SPEED, dir[2] * ROCKET_SPEED];
+      const id = this.nextRocketId++;
+      this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time });
+    }
   }
 
   /** Flies every rocket one tick; it goes off on the first thing it touches. */
