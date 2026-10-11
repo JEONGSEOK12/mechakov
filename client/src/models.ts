@@ -48,6 +48,12 @@ class Parts {
     return this;
   }
 
+  /** Adds geometry that already has its own vertex colors. */
+  colored(geo: THREE.BufferGeometry) {
+    this.list.push(geo);
+    return this;
+  }
+
   /** A box with its bottom center at (x, y, z). */
   box(w: number, h: number, d: number, x: number, y: number, z: number, color: number, rx = 0, ry = 0, rz = 0) {
     const g = new THREE.BoxGeometry(w, h, d);
@@ -830,4 +836,130 @@ export function containerModel(walls: Box[], colors: number[]): THREE.BufferGeom
     }
   });
   return p.merge();
+}
+
+/**
+ * Loot you can pick up, a little larger than life so it reads from across a
+ * room. Origin at the bottom center; the game spins and bobs it.
+ */
+const ITEM_MODELS: Record<string, (p: Parts) => void> = {
+  scrap(p) {
+    const rust = 0x8a5a3a;
+    p.box(0.34, 0.03, 0.2, 0, 0, 0, STEEL, 0, 0.3, 0.12);
+    p.box(0.26, 0.025, 0.16, 0.03, 0.05, -0.02, rust, 0.4, -0.5, 0);
+    p.box(0.05, 0.05, 0.3, -0.08, 0.1, 0.02, DARK_STEEL, 0.2, 0.6, 0.3);
+    p.lying('x', 0.025, 0.28, 0.02, 0.17, 0.05, shade(STEEL, 0.8));
+    p.box(0.12, 0.08, 0.02, 0.1, 0.12, -0.06, rust, 0, 0.9, 0.5);
+  },
+  bolts(p) {
+    const r = rng(7);
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const x = Math.cos(a) * 0.09;
+      const z = Math.sin(a) * 0.09;
+      const y = 0.02 + (i % 2) * 0.04;
+      // A hex head with a threaded shaft, lying in a loose pile.
+      const head = new THREE.CylinderGeometry(0.03, 0.03, 0.022, 6).rotateZ(Math.PI / 2);
+      const shaft = new THREE.CylinderGeometry(0.013, 0.013, 0.16, 8).rotateZ(Math.PI / 2).translate(0.09, 0, 0);
+      for (const geo of [head, shaft]) {
+        geo.rotateY(a + r() * 0.8).translate(x, y + 0.03, z);
+        p.add(geo, geo === head ? shade(STEEL, 1.1) : STEEL);
+      }
+    }
+    for (const [x, z] of [[0.13, 0.1], [-0.12, -0.11], [0.02, 0.15]]) p.ring(0.022, 0.009, x, 0.012, z, shade(STEEL, 0.85));
+    p.cyl(0.035, 0.03, 0, 0.1, 0, shade(STEEL, 1.1), 0.035, 6);
+  },
+  wires(p) {
+    for (let i = 0; i < 4; i++) p.ring(0.13 - i * 0.004, 0.018, 0, 0.03 + i * 0.03, 0, i % 2 ? 0xd4a017 : 0xc0392b);
+    // Loose ends with a plug.
+    p.lying('x', 0.015, 0.16, 0.2, 0.05, 0.06, 0xd4a017);
+    p.box(0.06, 0.04, 0.04, 0.3, 0.03, 0.06, BLACK);
+    for (const z of [0.05, 0.07]) p.lying('x', 0.004, 0.04, 0.35, 0.05, z, 0xc9a24a);
+  },
+  battery(p) {
+    p.box(0.32, 0.2, 0.2, 0, 0, 0, 0x22262a);
+    p.box(0.33, 0.025, 0.21, 0, 0.2, 0, BLACK);
+    p.box(0.2, 0.08, 0.005, -0.02, 0.07, 0.101, 0x3fbf5f);
+    p.box(0.08, 0.02, 0.006, -0.02, 0.09, 0.103, WHITE);
+    p.cyl(0.022, 0.035, -0.11, 0.225, 0, 0xc0392b);
+    p.cyl(0.022, 0.035, 0.11, 0.225, 0, BLACK);
+    p.lying('x', 0.008, 0.18, 0, 0.27, 0, DARK_STEEL);
+    for (const x of [-0.09, 0.09]) p.box(0.012, 0.045, 0.012, x, 0.225, 0, DARK_STEEL);
+  },
+  fuel(p) {
+    const red = 0xc0392b;
+    p.box(0.26, 0.34, 0.12, 0, 0, 0, red);
+    // The X stamped into the sides of a jerry can.
+    for (const s of [-1, 1]) {
+      p.box(0.3, 0.02, 0.008, 0, 0.16, s * 0.062, shade(red, 0.75), 0, 0, 0.9);
+      p.box(0.3, 0.02, 0.008, 0, 0.16, s * 0.062, shade(red, 0.75), 0, 0, -0.9);
+    }
+    for (const x of [-0.07, 0, 0.07]) p.box(0.03, 0.06, 0.04, x, 0.34, 0, shade(red, 0.85));
+    p.box(0.18, 0.025, 0.04, 0, 0.4, 0, shade(red, 0.85));
+    p.cyl(0.03, 0.05, 0.1, 0.34, 0, DARK_STEEL);
+    p.cyl(0.034, 0.02, 0.1, 0.39, 0, BLACK);
+  },
+  circuit(p) {
+    const parts = new Parts();
+    const green = 0x1f7a4a;
+    parts.box(0.34, 0.015, 0.24, 0, 0, 0, green);
+    parts.box(0.08, 0.02, 0.08, -0.06, 0.015, 0.02, BLACK);
+    parts.box(0.05, 0.015, 0.03, 0.08, 0.015, -0.06, BLACK);
+    parts.box(0.05, 0.015, 0.03, 0.08, 0.015, 0.0, BLACK);
+    for (let i = 0; i < 9; i++) parts.box(0.018, 0.003, 0.02, -0.14 + i * 0.033, 0.015, 0.11, 0xd9b44a);
+    for (const [x, z] of [[0.12, 0.07], [0.15, 0.07], [-0.13, -0.08]]) parts.cyl(0.012, 0.035, x, 0.015, z, 0x2c4f9e);
+    parts.box(0.04, 0.03, 0.04, 0.12, 0.015, -0.1, STEEL);
+    for (let i = 0; i < 5; i++) parts.box(0.2, 0.002, 0.004, 0, 0.015, -0.03 - i * 0.012, 0xc9a24a);
+    // Propped up at an angle so the face shows.
+    p.colored(parts.merge().rotateX(-1.0).translate(0, 0.12, 0));
+  },
+  watch(p) {
+    const gold = 0xf1c40f;
+    p.lying('z', 0.1, 0.035, 0, 0.2, 0, gold, 24);
+    p.lying('z', 0.085, 0.006, 0, 0.2, 0.018, WHITE, 24);
+    p.box(0.006, 0.065, 0.004, 0, 0.21, 0.022, BLACK);
+    p.box(0.05, 0.006, 0.004, 0.02, 0.2, 0.023, BLACK, 0, 0, 0.5);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      p.box(0.006, 0.014, 0.004, Math.sin(a) * 0.072, 0.2 - 0.007 + Math.cos(a) * 0.072, 0.022, i % 3 ? shade(gold, 0.6) : BLACK, 0, 0, -a);
+    }
+    p.cyl(0.012, 0.025, 0.105, 0.2, 0, gold);
+    // Strap links above and below.
+    for (let i = 0; i < 4; i++) {
+      const link = i % 2 ? shade(gold, 0.85) : gold;
+      p.box(0.08, 0.022, 0.025, 0, 0.3 + i * 0.024, 0, link);
+      p.box(0.08, 0.022, 0.025, 0, 0.078 - i * 0.024, 0, link);
+    }
+  },
+  gpu(p) {
+    const shroud = 0x2a2c34;
+    const purple = 0x6c5ce7;
+    p.box(0.42, 0.11, 0.03, 0, 0.04, -0.03, 0x1f6a44);
+    p.box(0.42, 0.13, 0.07, 0, 0.03, 0.02, shroud);
+    p.box(0.42, 0.012, 0.072, 0, 0.15, 0.02, purple);
+    for (const x of [-0.1, 0.1]) {
+      p.lying('z', 0.052, 0.01, x, 0.095, 0.057, BLACK, 20);
+      p.lying('z', 0.018, 0.012, x, 0.095, 0.06, DARK_STEEL, 12);
+      for (let i = 0; i < 7; i++) p.box(0.006, 0.045, 0.004, x, 0.095 - 0.0225, 0.063, 0x3a3c44, 0, 0, (i / 7) * Math.PI);
+      p.ring(0.053, 0.005, x, 0.095, 0.062, purple, 'z');
+    }
+    p.box(0.012, 0.17, 0.08, -0.215, 0.01, 0.0, STEEL);
+    for (let i = 0; i < 8; i++) p.box(0.02, 0.012, 0.004, -0.12 + i * 0.025, 0.02, -0.046, 0xd9b44a);
+  },
+};
+
+const itemGeometries = new Map<string, THREE.BufferGeometry>();
+
+/** The detailed geometry for a loot item, shared by every copy of it. */
+export function itemModel(type: string, color: number): THREE.BufferGeometry {
+  let geo = itemGeometries.get(type);
+  if (!geo) {
+    const p = new Parts();
+    const model = ITEM_MODELS[type];
+    if (model) model(p);
+    else p.box(0.3, 0.2, 0.3, 0, 0, 0, color);
+    geo = p.merge();
+    itemGeometries.set(type, geo);
+  }
+  return geo;
 }

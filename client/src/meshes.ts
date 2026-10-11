@@ -4,7 +4,7 @@ import type { GameMap, Station } from '../../shared/map.ts';
 import type { Box, Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
 import type { Theme } from '../../shared/props.ts';
-import { containerModel, fenceModel, floorStripes, propModel, rackModel } from './models.ts';
+import { containerModel, fenceModel, floorStripes, itemModel, propModel, rackModel } from './models.ts';
 
 /** One tile per 2 m of floor. */
 function floorTexture(base: string, half: number): THREE.Texture {
@@ -274,9 +274,10 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
 export function createLootMesh(type: string): THREE.Object3D {
   const color = ITEMS[type].color;
   const g = new THREE.Group();
+  // A faint glow in the item's color so loot still stands out in dark corners.
   const item = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.2, 0.3),
-    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, roughness: 0.4 }),
+    itemModel(type, color),
+    new THREE.MeshStandardMaterial({ vertexColors: true, emissive: color, emissiveIntensity: 0.07, roughness: 0.45, metalness: 0.25 }),
   );
   item.position.y = 0.25;
   item.castShadow = true;
