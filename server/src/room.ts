@@ -633,12 +633,15 @@ export class Room {
 
   /**
    * Pushes everyone near the blast away from it (the shooter too, so props can
-   * rocket jump) and lightly hurts hunters. Walls block the blast.
+   * rocket jump) and lightly hurts everyone but the shooter, other props
+   * included, once the fighting has started. Walls block the blast.
    */
   private explode(r: Rocket) {
     this.rockets.delete(r.id);
     const owner = this.players.get(r.owner) ?? null;
     const hit: number[] = [];
+    // Same as when props may fire: the hunt, or any time in a raid without hunters.
+    const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
     for (const p of this.players.values()) {
       if (!p.alive || (p.bot && this.map.theme === 'hideout')) continue;
       const size = bodySize(p.role, p.prop);
@@ -661,7 +664,7 @@ export class Room {
       p.body.vy = Math.max(p.body.vy, 0) + Math.max(d[1], 0.45) * push;
       p.body.onGround = false;
       hit.push(p.id);
-      if (p.role === 'hunter' && this.phase === 'hunt') this.damage(p, Math.round(ROCKET_DAMAGE * (0.3 + 0.7 * strength)), owner);
+      if (p.id !== r.owner && fighting) this.damage(p, Math.round(ROCKET_DAMAGE * (0.3 + 0.7 * strength)), owner);
     }
     this.broadcast({ t: 'boom', from: r.owner, pos: r.pos, hit });
   }
@@ -670,16 +673,33 @@ export class Room {
     victim.hp = Math.max(0, victim.hp - amount);
     if (victim.hp > 0) return;
     victim.alive = false;
-    // The hunter takes what the prop was carrying, as far as their bag allows.
-    if (killer) {
-      // Plus a small bounty so hunters build up their stash too.
+    // Hunters can't pick things up, so one who kills takes what the prop
+    // carried, plus a small bounty, as far as their bag allows. Anything
+    // else falls to the floor for whoever gets there first.
+    if (killer?.role === 'hunter') {
       const take = [...victim.bag, BOUNTY[Math.floor(Math.random() * BOUNTY.length)]];
-      const room = bagCapacity(killer.profile) - killer.bag.length;
-      killer.bag.push(...take.slice(0, Math.max(0, room)));
+      const room = Math.max(0, bagCapacity(killer.profile) - killer.bag.length);
+      killer.bag.push(...take.slice(0, room));
+      victim.bag = victim.bag.slice(room);
       this.sendBag(killer);
     }
+    this.dropBag(victim);
     this.finishRaid(victim, 'died');
     this.broadcast({ t: 'kill', killer: killer?.id ?? null, victim: victim.id });
+  }
+
+  /** Spills what a dead player carried around where they fell, for anyone to pick up. */
+  private dropBag(p: Player) {
+    if (p.bag.length === 0) return;
+    const start = Math.random() * Math.PI * 2;
+    p.bag.forEach((type, i) => {
+      const a = start + (i / p.bag.length) * Math.PI * 2;
+      const r = p.bag.length > 1 ? 0.6 : 0;
+      const pos: Vec3 = [p.body.pos[0] + Math.cos(a) * r, p.body.pos[1], p.body.pos[2] + Math.sin(a) * r];
+      const id = this.nextLootId++;
+      this.loot.set(id, { id, type, pos });
+    });
+    this.broadcast({ t: 'loot', items: [...this.loot.values()] });
   }
 
   private sendBag(p: Player) {
