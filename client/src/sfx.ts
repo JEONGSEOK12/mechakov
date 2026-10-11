@@ -133,6 +133,17 @@ export const sfx = {
     noise(0.25, { freq: 2500, to: 300, volume: 0.6 * v });
     tone(120, 0.18, { type: 'square', to: 50, volume: 0.25 * v });
   },
+  rocketFire() {
+    noise(0.45, { filter: 'bandpass', freq: 900, to: 300, q: 0.8, volume: 0.35 });
+    tone(220, 0.25, { type: 'sawtooth', to: 90, volume: 0.12 });
+  },
+  explosion(dist: number) {
+    const v = Math.max(0, 1 - dist / 60) ** 1.5;
+    if (v <= 0.01) return;
+    noise(0.9, { freq: 1800, to: 120, volume: 0.8 * v });
+    noise(0.25, { filter: 'highpass', freq: 1500, volume: 0.25 * v });
+    tone(70, 0.6, { type: 'sine', to: 32, volume: 0.45 * v });
+  },
   hitConfirm() {
     tone(1400, 0.05, { type: 'square', volume: 0.12 });
     tone(1900, 0.06, { type: 'square', delay: 0.04, volume: 0.1 });

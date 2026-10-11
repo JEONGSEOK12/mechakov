@@ -16,7 +16,7 @@ test('the same seed gives the same map', () => {
 });
 
 test('bodies land on the floor and stay there', () => {
-  const b: BodyState = { pos: [0, 3, 0], vy: 0, onGround: false, stamina: 1, winded: false };
+  const b: BodyState = { pos: [0, 3, 0], vy: 0, vx: 0, vz: 0, onGround: false, stamina: 1, winded: false };
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, idle, 0, false, TICK_DT, []);
   assert.equal(b.pos[1], 0);
   assert.ok(b.onGround);
@@ -24,7 +24,7 @@ test('bodies land on the floor and stay there', () => {
 
 test('walls stop movement', () => {
   const wall: Box = { min: [-5, 0, -3], max: [5, 3, -2] };
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, vx: 0, vz: 0, onGround: true, stamina: 1, winded: false };
   // yaw 0 faces -z, towards the wall.
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, forward, 0, false, TICK_DT, [wall]);
   assert.ok(Math.abs(b.pos[2] - (-2 + 0.3)) < 0.01, `stopped at ${b.pos[2]}`);
@@ -32,13 +32,13 @@ test('walls stop movement', () => {
 
 test('low ledges are stepped over, tall ones are not', () => {
   const ledge: Box = { min: [-5, 0, -3], max: [5, 0.2, -2] };
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, vx: 0, vz: 0, onGround: true, stamina: 1, winded: false };
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, forward, 0, false, TICK_DT, [ledge]);
   assert.ok(b.pos[2] < -3, 'walked over the ledge');
 });
 
 test('frozen hunters cannot move or jump', () => {
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, vx: 0, vz: 0, onGround: true, stamina: 1, winded: false };
   for (let i = 0; i < 30; i++) stepBody(b, 'hunter', null, { ...forward, jump: true }, 0, true, TICK_DT, []);
   assert.deepEqual(b.pos, [0, 0, 0]);
 });

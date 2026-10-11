@@ -17,6 +17,8 @@ export interface PlayerSnap {
   extracting: number;
   pos: Vec3;
   vy: number;
+  vx: number;
+  vz: number;
   onGround: boolean;
   stamina: number;
   winded: boolean;
@@ -55,7 +57,15 @@ export type ClientMsg =
   | { t: 'start' }
   | { t: 'input'; seq: number; keys: InputKeys; yaw: number; pitch: number; face: number }
   | { t: 'shoot'; origin: Vec3; dir: Vec3 }
+  /** Props: fire an explosive rocket along the camera ray. */
+  | { t: 'rocket'; origin: Vec3; dir: Vec3 }
   | { t: 'disguise'; propId: number };
+
+export interface RocketSnap {
+  id: number;
+  pos: Vec3;
+  vel: Vec3;
+}
 
 export type ShotHit = 'player' | 'decoy' | 'world' | 'none';
 
@@ -67,8 +77,10 @@ export type ServerMsg =
   | { t: 'bag'; items: string[]; capacity: number }
   | { t: 'result'; outcome: Outcome; items: string[] }
   /** `players` holds only the players the receiver is allowed to see. */
-  | { t: 'snap'; time: number; phase: Phase; timeLeft: number; players: PlayerSnap[]; roster: RosterEntry[] }
+  | { t: 'snap'; time: number; phase: Phase; timeLeft: number; players: PlayerSnap[]; roster: RosterEntry[]; rockets: RocketSnap[] }
   | { t: 'shot'; from: number; origin: Vec3; end: Vec3; hit: ShotHit; target?: number }
+  /** A rocket went off: `hit` lists who it pushed or hurt. */
+  | { t: 'boom'; from: number; pos: Vec3; hit: number[] }
   | { t: 'kill'; killer: number | null; victim: number }
   | { t: 'roundEnd'; winner: Team | null }
   | { t: 'error'; message: string };

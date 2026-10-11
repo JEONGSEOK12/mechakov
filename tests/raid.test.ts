@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { TICK_DT } from '../shared/constants.ts';
 import type { ServerMsg } from '../shared/protocol.ts';
+import type { Vec3 } from '../shared/types.ts';
 import type { Profile } from '../shared/upgrades.ts';
 import { ProfileStore } from '../server/src/profiles.ts';
 import { Room, type Player } from '../server/src/room.ts';
@@ -190,4 +191,51 @@ test('solo: wait in the hideout, raid on a raid map, then come back', () => {
   for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
   assert.equal(phase(), 'lobby', 'back in the lobby, waiting again');
   assert.equal(room.map.theme, 'hideout');
+});
+
+test('prop rockets throw a hunter into the air and hurt them a little', () => {
+  const { room, hunter, prop, runUntil } = setup();
+  runUntil(() => room.phase === 'hunt');
+  // Somewhere open, so nothing is in the way: the middle of the map.
+  hunter.body.pos = [0, 0, -3];
+  prop.body.pos = [0, 0, 3];
+  hunter.body.onGround = true;
+  const hp = hunter.hp;
+  // Aim at the floor right in front of the hunter's feet.
+  const origin: Vec3 = [0, 1.5, 4.5];
+  const target: Vec3 = [0, 0, -2.5];
+  room.handle(prop, { t: 'rocket', origin, dir: [target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]] });
+  assert.equal(room.rockets.size, 1);
+  let launched = false;
+  for (let i = 0; i < 30 && !launched; i++) {
+    room.tick();
+    launched = hunter.body.vy > 3;
+  }
+  assert.ok(launched, `hunter launched (vy ${hunter.body.vy.toFixed(1)})`);
+  assert.equal(room.rockets.size, 0, 'the rocket went off');
+  assert.ok(Math.abs(hunter.body.vz) > 1, 'pushed away from the blast');
+  assert.ok(hunter.hp < hp && hunter.hp > hp - 25, `a little damage (${hp} -> ${hunter.hp})`);
+  assert.equal(prop.hp, 100, 'props are not hurt by rockets');
+
+  // The cooldown stops a second rocket straight away.
+  room.handle(prop, { t: 'rocket', origin, dir: [0, -1, -1] });
+  assert.equal(room.rockets.size, 0);
+});
+
+test('a prop can rocket jump off the floor under itself', () => {
+  const room = new Room('jump', 7, timings);
+  room.hunters = false;
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  room.addBot();
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  me.body.pos = [0, 0, 2];
+  me.body.onGround = true;
+  room.handle(me, { t: 'rocket', origin: [0, 1.6, 4], dir: [0, -1.6, -2] });
+  let top = 0;
+  for (let i = 0; i < 40; i++) {
+    me.inputs.push({ t: 'input', seq: i + 1, keys: { f: false, b: false, l: false, r: false, jump: false, sprint: false }, yaw: 0, pitch: 0, face: 0 });
+    room.tick();
+    top = Math.max(top, me.body.pos[1]);
+  }
+  assert.ok(top > 1.5, `flew ${top.toFixed(2)} m up`);
 });

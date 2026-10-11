@@ -1,13 +1,14 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
-  MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_COOLDOWN, ROCKET_DAMAGE, ROCKET_KNOCKBACK, ROCKET_LIFETIME,
+  ROCKET_RADIUS, ROCKET_SPEED, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
 import type { Theme } from '../../shared/props.ts';
 import { bodySize, newBody, stepBody, unstick, type BodyState } from '../../shared/physics.ts';
-import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg, ShotHit } from '../../shared/protocol.ts';
+import type { ClientMsg, Loot, Outcome, PlayerSnap, RocketSnap, ServerMsg, ShotHit } from '../../shared/protocol.ts';
 import type { InputKeys, Phase, Role, Team, Vec3 } from '../../shared/types.ts';
 import {
   bagCapacity, canAfford, canDisguiseAs, maxHp, missPenalty, nextCost, speedMult, UPGRADES, type Profile,
@@ -33,6 +34,7 @@ export class Player {
   seq = 0;
   inputs: InputMsg[] = [];
   lastShot = -Infinity;
+  lastRocket = -Infinity;
   /** Items picked up this raid; lost on death. */
   bag: string[] = [];
   extractTime = 0;
@@ -61,6 +63,8 @@ export class Player {
       extracting: Math.min(1, this.extractTime / extractTime),
       pos: [...this.body.pos],
       vy: this.body.vy,
+      vx: this.body.vx,
+      vz: this.body.vz,
       onGround: this.body.onGround,
       stamina: this.body.stamina,
       winded: this.body.winded,
@@ -100,6 +104,11 @@ export function cleanName(raw: unknown): string {
   return raw.replace(/[\p{C}\u200B-\u200F\u2060-\u206F]/gu, '').trim().slice(0, 16);
 }
 
+interface Rocket extends RocketSnap {
+  owner: number;
+  born: number;
+}
+
 function inBox(p: Vec3, b: { min: Vec3; max: Vec3 }) {
   return p[0] >= b.min[0] && p[0] <= b.max[0] && p[2] >= b.min[2] && p[2] <= b.max[2] && p[1] <= b.max[1] + 0.5;
 }
@@ -111,6 +120,8 @@ export class Room {
   time = 0;
   phaseEnds = 0;
   loot = new Map<number, Loot>();
+  rockets = new Map<number, Rocket>();
+  private nextRocketId = 1;
   private nextId = 1;
   private nextLootId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -205,6 +216,9 @@ export class Room {
       case 'shoot':
         if (isVec3(msg.origin) && isVec3(msg.dir)) this.shoot(p, msg.origin, msg.dir);
         break;
+      case 'rocket':
+        if (isVec3(msg.origin) && isVec3(msg.dir)) this.fireRocket(p, msg.origin, msg.dir);
+        break;
       case 'disguise':
         if (isNum(msg.propId)) this.disguise(p, msg.propId);
         break;
@@ -250,6 +264,7 @@ export class Room {
       }
       this.updateExtraction(p);
     }
+    this.moveRockets();
 
     this.sendSnapshots();
   }
@@ -264,7 +279,8 @@ export class Room {
     const shown = this.map.theme === 'hideout' ? all.filter((p) => !p.bot) : all;
     const snaps = new Map(shown.map((p) => [p.id, p.snap(this.timings.extract)]));
     const roster = all.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
-    const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster };
+    const rockets = [...this.rockets.values()].map(({ id, pos, vel }) => ({ id, pos, vel }));
+    const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster, rockets };
     const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
     for (const viewer of all) {
       if (viewer.role !== 'hunter' || !viewer.alive || (this.phase !== 'hide' && this.phase !== 'hunt')) {
@@ -368,6 +384,7 @@ export class Room {
 
   private spawnLoot() {
     this.loot.clear();
+    this.rockets.clear();
     const total = ITEM_TYPES.reduce((s, k) => s + ITEMS[k].weight, 0);
     const count = 16 + 4 * this.players.size;
     for (const pos of shuffle(this.map.lootSpots).slice(0, count)) {
@@ -437,6 +454,7 @@ export class Room {
     const winner: Team = propsWon ? 'props' : 'hunters';
     this.setPhase('end', this.timings.end);
     this.loot.clear();
+    this.rockets.clear();
     this.broadcast({ t: 'loot', items: [] });
     this.broadcast({ t: 'roundEnd', winner });
   }
@@ -453,6 +471,7 @@ export class Room {
   }
 
   private changeMap(theme: Theme) {
+    this.rockets.clear();
     if (this.map.theme !== 'hideout') this.lastRaid = this.map.theme;
     this.map = generateMap(Math.floor(Math.random() * 1e9), theme);
     this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
@@ -542,6 +561,89 @@ export class Room {
 
     if (target) this.damage(target, SHOT_DAMAGE, p);
     else if (hit === 'decoy') this.damage(p, missPenalty(p.profile), null);
+  }
+
+  /**
+   * Props fire slow explosive rockets along their camera ray. Allowed whenever
+   * a prop can move about (not while hunters are blind in the hiding phase,
+   * unless there are no hunters at all).
+   */
+  private fireRocket(p: Player, origin: Vec3, rawDir: Vec3) {
+    if (!p.alive || p.role !== 'prop' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
+    if (this.time - p.lastRocket < ROCKET_COOLDOWN - 0.05) return;
+    const len = Math.hypot(...rawDir);
+    if (len < 1e-6) return;
+    const dir: Vec3 = [rawDir[0] / len, rawDir[1] / len, rawDir[2] / len];
+    const size = bodySize(p.role, p.prop);
+    const center: Vec3 = [p.body.pos[0], p.body.pos[1] + size[1] / 2, p.body.pos[2]];
+    if (Math.hypot(origin[0] - center[0], origin[1] - center[1], origin[2] - center[2]) > 8) return;
+    p.lastRocket = this.time;
+    // Start on the camera ray where it passes the prop, so it flies at the crosshair.
+    const along = Math.max(0, (center[0] - origin[0]) * dir[0] + (center[1] - origin[1]) * dir[1] + (center[2] - origin[2]) * dir[2]);
+    const pos: Vec3 = [origin[0] + dir[0] * along, origin[1] + dir[1] * along, origin[2] + dir[2] * along];
+    const vel: Vec3 = [dir[0] * ROCKET_SPEED, dir[1] * ROCKET_SPEED, dir[2] * ROCKET_SPEED];
+    const id = this.nextRocketId++;
+    this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time });
+  }
+
+  /** Flies every rocket one tick; it goes off on the first thing it touches. */
+  private moveRockets() {
+    for (const r of this.rockets.values()) {
+      const step = ROCKET_SPEED * TICK_DT;
+      const dir: Vec3 = [r.vel[0] / ROCKET_SPEED, r.vel[1] / ROCKET_SPEED, r.vel[2] / ROCKET_SPEED];
+      let t = step;
+      for (const s of this.map.solids) {
+        const d = rayBox(r.pos, dir, s);
+        if (d !== null && d < t) t = d;
+      }
+      for (const other of this.players.values()) {
+        if (other.id === r.owner || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
+        const d = rayBox(r.pos, dir, boxAt(other.body.pos, bodySize(other.role, other.prop)));
+        if (d !== null && d < t) t = d;
+      }
+      if (dir[1] < 0) t = Math.min(t, -r.pos[1] / dir[1]);
+      const hit = t < step;
+      // Stop just short of the surface so the blast centre isn't inside it.
+      const go = hit ? Math.max(0, t - 0.05) : step;
+      r.pos = [r.pos[0] + dir[0] * go, r.pos[1] + dir[1] * go, r.pos[2] + dir[2] * go];
+      if (hit) this.explode(r);
+      else if (this.time - r.born > ROCKET_LIFETIME) this.rockets.delete(r.id);
+    }
+  }
+
+  /**
+   * Pushes everyone near the blast away from it (the shooter too, so props can
+   * rocket jump) and lightly hurts hunters. Walls block the blast.
+   */
+  private explode(r: Rocket) {
+    this.rockets.delete(r.id);
+    const owner = this.players.get(r.owner) ?? null;
+    const hit: number[] = [];
+    for (const p of this.players.values()) {
+      if (!p.alive || (p.bot && this.map.theme === 'hideout')) continue;
+      const size = bodySize(p.role, p.prop);
+      const box = boxAt(p.body.pos, size);
+      const dist = pointBoxDistance(r.pos, box);
+      if (dist > ROCKET_RADIUS) continue;
+      const center: Vec3 = [p.body.pos[0], p.body.pos[1] + size[1] / 2, p.body.pos[2]];
+      let d: Vec3 = [center[0] - r.pos[0], center[1] - r.pos[1], center[2] - r.pos[2]];
+      const len = Math.hypot(...d);
+      if (len > 0.3 && this.map.walls.some((w) => {
+        const t = rayBox(r.pos, [d[0] / len, d[1] / len, d[2] / len], w);
+        return t !== null && t < len - 0.3;
+      })) continue;
+      d = len > 1e-3 ? [d[0] / len, d[1] / len, d[2] / len] : [0, 1, 0];
+      const strength = 1 - dist / ROCKET_RADIUS;
+      const push = ROCKET_KNOCKBACK * (0.35 + 0.65 * strength);
+      p.body.vx += d[0] * push;
+      p.body.vz += d[2] * push;
+      // Always some lift, so a shot at someone's feet throws them up.
+      p.body.vy = Math.max(p.body.vy, 0) + Math.max(d[1], 0.45) * push;
+      p.body.onGround = false;
+      hit.push(p.id);
+      if (p.role === 'hunter' && this.phase === 'hunt') this.damage(p, Math.round(ROCKET_DAMAGE * (0.3 + 0.7 * strength)), owner);
+    }
+    this.broadcast({ t: 'boom', from: r.owner, pos: r.pos, hit });
   }
 
   private damage(victim: Player, amount: number, killer: Player | null) {
