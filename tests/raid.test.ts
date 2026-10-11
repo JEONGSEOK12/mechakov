@@ -205,6 +205,8 @@ test('prop rockets throw a hunter into the air and hurt them a little', () => {
   const origin: Vec3 = [0, 1.5, 4.5];
   const target: Vec3 = [0, 0, -2.5];
   room.handle(prop, { t: 'rocket', origin, dir: [target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]] });
+  assert.equal(room.rockets.size, 0, 'a short wind-up before it leaves');
+  for (let i = 0; i < 0.15 / TICK_DT + 1 && room.rockets.size === 0; i++) room.tick();
   assert.equal(room.rockets.size, 1);
   let launched = false;
   for (let i = 0; i < 30 && !launched; i++) {
@@ -219,6 +221,9 @@ test('prop rockets throw a hunter into the air and hurt them a little', () => {
 
   // The cooldown stops a second rocket straight away.
   room.handle(prop, { t: 'rocket', origin, dir: [0, -1, -1] });
+  room.tick();
+  room.tick();
+  assert.equal(prop.pendingRocket, null);
   assert.equal(room.rockets.size, 0);
 });
 

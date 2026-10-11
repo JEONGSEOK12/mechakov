@@ -54,7 +54,9 @@ export class Hud {
     fill.style.width = `${(me.hp / me.maxHp) * 100}%`;
     const ratio = me.hp / me.maxHp;
     fill.style.background = ratio > 0.5 ? '#4cd964' : ratio > 0.25 ? '#ffcc00' : '#ff3b30';
-    $('crosshair').classList.toggle('hidden', !(me.alive && me.role === 'hunter'));
+    const cross = $('crosshair');
+    cross.classList.toggle('hidden', !me.alive);
+    cross.classList.toggle('prop', me.role === 'prop');
   }
 
   /** The named area you're standing in, e.g. 사무실 inside the warehouse. */
