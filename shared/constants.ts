@@ -24,6 +24,8 @@ export interface Timings {
   hide: number;
   hunt: number;
   end: number;
+  /** Seconds a prop has to stay in an exit zone to get out. */
+  extract: number;
 }
 
 export const DEFAULT_TIMINGS: Timings = {
@@ -31,12 +33,13 @@ export const DEFAULT_TIMINGS: Timings = {
   hide: 30,
   hunt: 180,
   end: 8,
+  extract: 5,
 };
 
-export const MAX_HP = 100;
 export const SHOT_DAMAGE = 25;
-/** Hunters lose this much HP when they shoot a decoy prop. */
-export const MISS_PENALTY = 5;
 export const FIRE_COOLDOWN = 0.4;
 export const SHOT_RANGE = 60;
 export const DISGUISE_RANGE = 4;
+
+export const LOOT_PER_ROUND = 24;
+export const PICKUP_RANGE = 2;

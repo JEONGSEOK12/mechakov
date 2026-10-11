@@ -1,5 +1,5 @@
-import { MAX_HP } from '../../shared/constants.ts';
-import type { PlayerSnap } from '../../shared/protocol.ts';
+import { ITEMS } from '../../shared/items.ts';
+import type { Outcome, PlayerSnap } from '../../shared/protocol.ts';
 import type { Phase, Team } from '../../shared/types.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -33,6 +33,9 @@ export class Hud {
     if (phase === 'lobby' || phase === 'countdown') {
       role.textContent = '대기실: 변신 연습 중';
       role.style.color = '#ffd27a';
+    } else if (me.extracted) {
+      role.textContent = '탈출 성공: 관전 중';
+      role.style.color = '#4cd964';
     } else if (me.role === 'spectator' || !me.alive) {
       role.textContent = me.role === 'spectator' ? '관전 중 (다음 라운드부터 참가)' : '사망: 관전 중';
       role.style.color = '#aaa';
@@ -44,14 +47,45 @@ export class Hud {
       role.style.color = '#7ad0ff';
     }
     const fill = $('hp-fill');
-    fill.style.width = `${(me.hp / MAX_HP) * 100}%`;
-    fill.style.background = me.hp > 50 ? '#4cd964' : me.hp > 25 ? '#ffcc00' : '#ff3b30';
+    fill.style.width = `${(me.hp / me.maxHp) * 100}%`;
+    const ratio = me.hp / me.maxHp;
+    fill.style.background = ratio > 0.5 ? '#4cd964' : ratio > 0.25 ? '#ffcc00' : '#ff3b30';
     $('crosshair').classList.toggle('hidden', !(me.alive && me.role === 'hunter'));
   }
 
   blind(show: boolean, timeLeft: number) {
     $('blind').classList.toggle('show', show);
     if (show) $('blind-text').innerHTML = `프롭들이 숨고 있어요<br>${Math.ceil(timeLeft)}`;
+  }
+
+  bag(items: string[], capacity: number, show: boolean) {
+    const el = $('bag');
+    if (!show) {
+      el.textContent = '';
+      return;
+    }
+    const names = items.map((i) => ITEMS[i].name).join(', ');
+    el.textContent = `가방 ${items.length}/${capacity}${names ? `: ${names}` : ''}`;
+  }
+
+  extract(progress: number) {
+    $('extract').classList.toggle('show', progress > 0);
+    $('extract-fill').style.width = `${progress * 100}%`;
+  }
+
+  result(outcome: Outcome | null, items: string[]) {
+    const el = $('result');
+    if (!outcome) {
+      el.textContent = '';
+      return;
+    }
+    const list = items.length ? items.map((i) => ITEMS[i].name).join(', ') : '없음';
+    el.textContent = {
+      extracted: `탈출 성공! 보관함으로: ${list}`,
+      survived: `생존! 보관함으로: ${list}`,
+      died: items.length ? `사망: 잃은 아이템 ${list}` : '사망',
+      mia: items.length ? `탈출 실패: 잃은 아이템 ${list}` : '탈출 실패',
+    }[outcome];
   }
 
   hint(text: string) {

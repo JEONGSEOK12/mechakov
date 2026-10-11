@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HUNTER_SIZE } from '../../shared/constants.ts';
 import type { GameMap } from '../../shared/map.ts';
+import { ITEMS } from '../../shared/items.ts';
 import { PROPS } from '../../shared/props.ts';
 
 function crateTexture(): THREE.Texture {
@@ -147,4 +148,48 @@ export function buildWorld(scene: THREE.Scene, map: GameMap): World {
     propMeshes.push(mesh);
   }
   return { colliders, propMeshes };
+}
+
+/** A small glowing pickup. Origin at its bottom. */
+export function createLootMesh(type: string): THREE.Object3D {
+  const color = ITEMS[type].color;
+  const g = new THREE.Group();
+  const item = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.2, 0.3),
+    new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, roughness: 0.4 }),
+  );
+  item.position.y = 0.25;
+  item.castShadow = true;
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.25, 0.32, 24).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.6 }),
+  );
+  ring.position.y = 0.02;
+  g.add(item, ring);
+  g.userData.spin = item;
+  return g;
+}
+
+export function buildExits(scene: THREE.Scene, map: GameMap): THREE.Object3D[] {
+  return map.exits.map((e) => {
+    const w = e.max[0] - e.min[0];
+    const d = e.max[2] - e.min[2];
+    const g = new THREE.Group();
+    const pad = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 0.04, d),
+      new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.45 }),
+    );
+    pad.position.y = 0.02;
+    const beam = new THREE.Mesh(
+      new THREE.BoxGeometry(w, 4, d),
+      new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.08, depthWrite: false }),
+    );
+    beam.position.y = 2;
+    const light = new THREE.PointLight(0x3ddc84, 8, 8, 1.5);
+    light.position.y = 2;
+    g.add(pad, beam, light);
+    g.position.set((e.min[0] + e.max[0]) / 2, 0, (e.min[2] + e.max[2]) / 2);
+    scene.add(g);
+    return g;
+  });
 }
