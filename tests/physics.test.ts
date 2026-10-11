@@ -98,3 +98,17 @@ for (const theme of THEMES) {
     }
   });
 }
+
+test('the hideout has its stations in reach', () => {
+  const map = generateMap(1, 'hideout');
+  const reach = reachable(map);
+  for (const p of [...map.propSpawns, ...Object.values(map.stations!)]) {
+    assert.ok(reach(p[0], p[2]), `(${p[0]}, ${p[2]}) is cut off`);
+    assert.ok(!map.solids.some((b) => overlaps(boxAt(p, [0.6, 1.8, 0.6]), b)), `(${p[0]}, ${p[2]}) is inside something`);
+  }
+  // Every station sits by what it's for.
+  for (const [station, at] of Object.entries(map.stations!)) {
+    const near = station === 'door' ? map.exits : map.propBoxes;
+    assert.ok(near.some((b) => Math.hypot(Math.max(b.min[0] - at[0], 0, at[0] - b.max[0]), Math.max(b.min[2] - at[2], 0, at[2] - b.max[2])) < 1.2), station);
+  }
+});

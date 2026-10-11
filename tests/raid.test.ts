@@ -160,17 +160,24 @@ test('with hunters off, the person is a prop and can loot and extract right away
   assert.equal(human.profile.stash[item.type], 1);
 });
 
-test('with auto start off, the room waits for start and ends once the person is out', () => {
-  const room = new Room('solo-lobby', 7, timings);
+test('solo: wait in the hideout, raid on a raid map, then come back', () => {
+  const room = new Room('solo-lobby', 7, timings, undefined, 'hideout');
   room.hunters = false;
   room.autoStart = false;
-  const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const msgs: ServerMsg[] = [];
+  const human = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
   room.addBot();
   const phase = () => room.phase;
   for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
   assert.equal(phase(), 'lobby', 'waits without a start');
+  assert.equal(room.map.theme, 'hideout');
+  const snap = msgs.filter((m) => m.t === 'snap').at(-1)!;
+  assert.deepEqual(snap.t === 'snap' && snap.players.map((p) => p.id), [human.id], 'bots are not shown in the hideout');
 
   room.handle(human, { t: 'start' });
+  room.tick();
+  assert.notEqual(room.map.theme, 'hideout', 'the raid is on a raid map');
+  assert.ok(msgs.some((m) => m.t === 'map' && m.theme === room.map.theme));
   for (let i = 0; i < 2 / TICK_DT && phase() !== 'hide'; i++) room.tick();
   assert.equal(phase(), 'hide');
 
@@ -182,4 +189,5 @@ test('with auto start off, the room waits for start and ends once the person is 
   assert.equal(phase(), 'end', 'round ends without waiting for the bot');
   for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
   assert.equal(phase(), 'lobby', 'back in the lobby, waiting again');
+  assert.equal(room.map.theme, 'hideout');
 });

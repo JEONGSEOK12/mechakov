@@ -1,5 +1,4 @@
 import { DEFAULT_TIMINGS } from '../../shared/constants.ts';
-import { THEMES } from '../../shared/map.ts';
 import type { ClientMsg, ServerMsg } from '../../shared/protocol.ts';
 import type { Profile } from '../../shared/upgrades.ts';
 import { Room, type Player } from '../../server/src/room.ts';
@@ -19,9 +18,10 @@ function loadProfile(name: string): Profile {
 }
 
 /**
- * Solo play with no server: the same game room runs in this tab. For now there
- * are no hunters: you and the bots are props looting and extracting. Progress
- * is kept in this browser.
+ * Solo play with no server: the same game room runs in this tab. Between raids
+ * you walk around the hideout map; in raids there are no hunters for now, just
+ * you and the bots as props looting and extracting. Progress is kept in this
+ * browser.
  */
 export class LocalNet implements Connection {
   onMessage: (msg: ServerMsg) => void = () => {};
@@ -31,8 +31,7 @@ export class LocalNet implements Connection {
   private profile: Profile | null = null;
 
   constructor() {
-    const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
-    this.room = new Room('solo', Math.floor(Math.random() * 1e9), DEFAULT_TIMINGS, { save: () => this.saveProfile() }, theme);
+    this.room = new Room('solo', Math.floor(Math.random() * 1e9), DEFAULT_TIMINGS, { save: () => this.saveProfile() }, 'hideout');
     this.room.hunters = false;
     this.room.autoStart = false;
     this.room.start();

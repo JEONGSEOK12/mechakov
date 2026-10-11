@@ -28,10 +28,13 @@ export class Hud {
     $('phase-timer').textContent = phase === 'lobby' ? '' : clock(timeLeft);
   }
 
-  me(me: PlayerSnap | undefined, phase: Phase) {
+  me(me: PlayerSnap | undefined, phase: Phase, inHideout = false) {
     const role = $('role');
     if (!me) return;
-    if (phase === 'lobby' || phase === 'countdown') {
+    if (inHideout && phase === 'lobby') {
+      role.textContent = '은신처: 출구 문으로 나가면 레이드 시작';
+      role.style.color = '#ffd27a';
+    } else if (phase === 'lobby' || phase === 'countdown') {
       role.textContent = '대기실: 변신 연습 중';
       role.style.color = '#ffd27a';
     } else if (me.extracted) {

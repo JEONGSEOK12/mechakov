@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
-import { generateMap, THEME_NAMES, type GameMap } from '../../shared/map.ts';
+import { generateMap, STATION_RANGE, THEME_NAMES, type GameMap, type Station } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
 import { ITEMS } from '../../shared/items.ts';
 import { PROPS, type Theme } from '../../shared/props.ts';
@@ -10,7 +10,7 @@ import { canDisguiseAs, type Profile } from '../../shared/upgrades.ts';
 import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
 import { Hideout } from './hideout.ts';
-import { Hud, resultText } from './hud.ts';
+import { Hud } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
 
@@ -43,6 +43,8 @@ function lerpAngle(a: number, b: number, t: number) {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * t;
 }
+
+const STATION_HINTS: Record<Station, string> = { stash: 'F: 보관함 열기', bench: 'F: 작업대에서 업그레이드', door: 'F: 레이드 출발' };
 
 export class Game {
   private renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -89,6 +91,8 @@ export class Game {
   private bagCapacity = 3;
   private loot = new Map<number, { data: Loot; mesh: THREE.Object3D }>();
   private pickupTarget: number | null = null;
+  /** The hideout station you're standing at, if any. */
+  private station: Station | null = null;
   private result: { outcome: Outcome; items: string[] } | null = null;
   private lastHideoutRender = 0;
 
@@ -123,13 +127,13 @@ export class Game {
     };
     this.controls.onPickup = () => {
       if (this.pickupTarget !== null) this.net.send({ t: 'pickup', lootId: this.pickupTarget });
+      else if (this.station) this.useStation(this.station);
     };
     this.controls.onHideout = () => {
-      this.hideout.toggle();
+      this.hideout.toggle(!this.hideout.open, 'all');
       this.renderHideout();
     };
     this.hideout.onUpgrade = (id) => this.net.send({ t: 'upgrade', id });
-    this.hideout.onStart = () => this.net.send({ t: 'start' });
     this.controls.onAddBot = () => {
       if (this.phase === 'lobby' || this.phase === 'countdown') this.net.send({ t: 'addBot' });
     };
@@ -206,11 +210,6 @@ export class Game {
     this.timeAt = performance.now();
     this.latest = new Map(msg.players.map((p) => [p.id, p]));
     this.roster = new Map(msg.roster.map((p) => [p.id, p]));
-    if (this.manualStart) {
-      const wasLobby = this.hideout.lobby;
-      this.hideout.setLobby(this.phase === 'lobby', this.result ? `지난 레이드: ${resultText(this.result.outcome, this.result.items)}` : '');
-      if (this.hideout.lobby && !wasLobby) this.renderHideout();
-    }
     this.snaps.push({ at: this.timeAt, players: this.latest });
     while (this.snaps.length > 30) this.snaps.shift();
 
@@ -365,6 +364,7 @@ export class Game {
     this.updateCamera(me, myPos, players);
     this.updateDisguiseTarget(me, myPos);
     this.updatePickupTarget(me, myPos);
+    this.updateStation(myPos);
     for (const { mesh } of this.loot.values()) {
       const spin = mesh.userData.spin as THREE.Object3D;
       spin.rotation.y = now / 600;
@@ -443,7 +443,7 @@ export class Game {
   private updateHud(me: PlayerSnap | undefined) {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart);
-    this.hud.me(me, this.phase);
+    this.hud.me(me, this.phase, !!this.map.stations);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
     this.hud.inventory(this.inventoryOpen, {
       bag: this.bag,
@@ -466,9 +466,10 @@ export class Game {
     const inRaid = !!me?.alive && me.role !== 'spectator' && (this.phase === 'hide' || this.phase === 'hunt');
     this.hud.bag(this.bag, this.bagCapacity, inRaid);
     this.hud.extract(me?.alive ? me.extracting : 0);
-    this.hud.result(this.phase === 'lobby' ? null : this.result?.outcome ?? null, this.result?.items ?? []);
+    this.hud.result(this.phase === 'lobby' && !this.map.stations ? null : this.result?.outcome ?? null, this.result?.items ?? []);
 
     const hints: string[] = [];
+    if (this.station && this.pickupTarget === null) hints.push(STATION_HINTS[this.station]);
     if (this.pickupTarget !== null) {
       const name = ITEMS[this.loot.get(this.pickupTarget)!.data.type].name;
       hints.push(this.bag.length >= this.bagCapacity ? `가방이 가득 찼어요 (${name})` : `F: ${name} 줍기`);
@@ -510,6 +511,29 @@ export class Game {
       this.scene.add(mesh);
       this.loot.set(item.id, { data: item, mesh });
     }
+  }
+
+  private updateStation(myPos: THREE.Vector3 | null) {
+    this.station = null;
+    if (!myPos || !this.map.stations || this.phase !== 'lobby') return;
+    let best = STATION_RANGE;
+    for (const [station, at] of Object.entries(this.map.stations) as [Station, Vec3][]) {
+      const d = Math.hypot(at[0] - myPos.x, at[2] - myPos.z);
+      if (d < best) {
+        best = d;
+        this.station = station;
+      }
+    }
+  }
+
+  private useStation(station: Station) {
+    if (station === 'door') {
+      this.hideout.toggle(false);
+      this.net.send({ t: 'start' });
+      return;
+    }
+    this.hideout.toggle(true, station);
+    this.renderHideout();
   }
 
   private updatePickupTarget(me: PlayerSnap | undefined, myPos: THREE.Vector3 | null) {
