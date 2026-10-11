@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mechakov</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud" class="hidden">
+      <div id="phase"><span id="phase-label"></span> <span id="phase-timer"></span></div>
+      <div id="killfeed"></div>
+      <div id="crosshair"></div>
+      <div id="hitmarker"></div>
+      <div id="hint"></div>
+      <div id="status">
+        <div id="role"></div>
+        <div id="hp-bar"><div id="hp-fill"></div></div>
+      </div>
+      <div id="help">
+        WASD 이동 · Space 점프 · Shift 달리기<br />
+        프롭: E 변신 · R 방향 고정 &nbsp; 헌터: 클릭 사격<br />
+        Tab 점수판 · 화면 클릭으로 마우스 잠금
+      </div>
+      <div id="center-msg"></div>
+      <div id="blind"><div id="blind-text"></div></div>
+      <div id="damage-flash"></div>
+      <div id="scoreboard" class="hidden"></div>
+    </div>
+
+    <form id="join">
+      <h1>MECHAKOV</h1>
+      <p>사물로 숨거나, 숨은 사물을 찾아내세요.</p>
+      <input id="name" maxlength="16" placeholder="닉네임" autocomplete="off" />
+      <input id="room" maxlength="32" placeholder="방 이름 (기본: main)" autocomplete="off" />
+      <button type="submit">입장</button>
+      <div id="join-error"></div>
+    </form>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
