@@ -124,10 +124,24 @@ export class Hud {
     this.flash('damage-flash');
   }
 
-  scoreboard(show: boolean, players: RosterEntry[], visible: Map<number, PlayerSnap>, myId: number) {
-    const el = $('scoreboard');
+  /** The Tab panel: what you carry this raid, what's banked, and who's in the round. */
+  inventory(show: boolean, inv: InventoryView) {
+    const el = $('inventory');
     el.classList.toggle('hidden', !show);
     if (!show) return;
+    const { bag, capacity, stash, players, visible, myId } = inv;
+    const item = (type: string, count?: number) => {
+      const def = ITEMS[type];
+      const color = `#${def.color.toString(16).padStart(6, '0')}`;
+      return `<div class="slot" style="--item:${color}"><span>${def.name}</span>` +
+        `<small>${count !== undefined ? `×${count} · ` : ''}${def.value * (count ?? 1)}</small></div>`;
+    };
+    const bagSlots = Array.from({ length: Math.max(capacity, bag.length) }, (_, i) =>
+      bag[i] ? item(bag[i]) : '<div class="slot empty"></div>').join('');
+    const bagValue = bag.reduce((s, t) => s + ITEMS[t].value, 0);
+    const stashed = Object.entries(stash).filter(([, n]) => n > 0).sort(([a], [b]) => ITEMS[b].value - ITEMS[a].value);
+    const stashValue = stashed.reduce((s, [t, n]) => s + ITEMS[t].value * n, 0);
+
     // Only your own HP: other players' numbers would hint at who is in view.
     const status = (p: RosterEntry) => (p.extracted ? '탈출' : !p.alive ? '사망' : p.id === myId ? visible.get(p.id)?.hp ?? '' : '생존');
     const section = (title: string, list: RosterEntry[]) =>
@@ -136,10 +150,25 @@ export class Hud {
         `<div class="row ${p.alive ? '' : 'dead'}"><span>${escape(p.name)}${p.id === myId ? ' (나)' : ''}</span><span>${status(p)}</span></div>`,
       ).join('');
     el.innerHTML =
+      `<div class="inv-col"><h3>가방 <small>${bag.length}/${capacity} · 가치 ${bagValue}</small></h3>` +
+      `<div class="slots">${bagSlots}</div>` +
+      `<h3>보관함 <small>가치 ${stashValue}</small></h3>` +
+      (stashed.length ? `<div class="slots">${stashed.map(([t, n]) => item(t, n)).join('')}</div>` : '<p class="muted">아직 없어요. 아이템을 챙겨 탈출하세요.</p>') +
+      `</div><div class="inv-col players">` +
       section('헌터', players.filter((p) => p.role === 'hunter')) +
       section('프롭', players.filter((p) => p.role === 'prop')) +
-      section('관전', players.filter((p) => p.role === 'spectator'));
+      section('관전', players.filter((p) => p.role === 'spectator')) +
+      `</div><div class="inv-foot">Tab 닫기</div>`;
   }
+}
+
+interface InventoryView {
+  bag: string[];
+  capacity: number;
+  stash: Record<string, number>;
+  players: RosterEntry[];
+  visible: Map<number, PlayerSnap>;
+  myId: number;
 }
 
 function escape(s: string) {

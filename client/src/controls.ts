@@ -21,7 +21,7 @@ export class Controls {
   onHideout: () => void = () => {};
   onAddBot: () => void = () => {};
   onToggleRotationLock: () => void = () => {};
-  onScoreboard: (show: boolean) => void = () => {};
+  onInventory: () => void = () => {};
 
   constructor(private canvas: HTMLElement) {
     canvas.addEventListener('click', () => {
@@ -81,7 +81,7 @@ export class Controls {
       case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
       case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
       case 'KeyB': if (down && !e.repeat) this.onAddBot(); break;
-      case 'Tab': this.onScoreboard(down); break;
+      case 'Tab': if (down && !e.repeat) this.onInventory(); break;
       default: return;
     }
     e.preventDefault();

@@ -63,4 +63,4 @@ npm start          # http://localhost:2567, PORT 환경 변수로 변경 가능
 
 ## 조작
 
-WASD 이동 · Space 점프 · Shift 달리기 · E 변신 · R 방향 고정 · 클릭 사격 · Tab 점수판
+WASD 이동 · Space 점프 · Shift 달리기 · E 변신 · R 방향 고정 · 클릭 사격 · Tab 인벤토리 (가방, 보관함, 참가자)
