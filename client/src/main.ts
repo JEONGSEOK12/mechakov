@@ -7,7 +7,11 @@ const roomInput = document.getElementById('room') as HTMLInputElement;
 const error = document.getElementById('join-error')!;
 
 const params = new URLSearchParams(location.search);
-nameInput.value = params.get('name') ?? localStorage.getItem('mechakov:name') ?? '';
+try {
+  nameInput.value = params.get('name') ?? localStorage.getItem('mechakov:name') ?? '';
+} catch {
+  nameInput.value = params.get('name') ?? '';
+}
 roomInput.value = params.get('room') ?? '';
 
 form.addEventListener('submit', async (e) => {
@@ -29,11 +33,22 @@ form.addEventListener('submit', async (e) => {
   }
   net.onMessage = (msg) => {
     if (msg.t === 'welcome') {
+      try {
+        localStorage.setItem('mechakov:token', msg.token);
+      } catch {
+        // Without storage the profile only lasts for this visit.
+      }
       form.classList.add('hidden');
-      new Game(net, msg.id, msg.seed).start();
+      new Game(net, msg.id, msg.seed, msg.profile).start();
     } else if (msg.t === 'error') {
       error.textContent = msg.message;
     }
   };
-  net.send({ t: 'join', name });
+  let token: string | undefined;
+  try {
+    token = localStorage.getItem('mechakov:token') ?? undefined;
+  } catch {
+    token = undefined;
+  }
+  net.send({ t: 'join', name, token });
 });

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { DEFAULT_TIMINGS, type Timings } from '../../shared/constants.ts';
 import type { ClientMsg } from '../../shared/protocol.ts';
+import { ProfileStore } from './profiles.ts';
 import { Room, type Player } from './room.ts';
 
 export interface ServerOptions {
@@ -12,6 +13,8 @@ export interface ServerOptions {
   staticDir?: string;
   timings?: Timings;
   seed?: number;
+  /** JSON file for player profiles; in memory when omitted. */
+  profilesFile?: string;
 }
 
 const MIME: Record<string, string> = {
@@ -43,6 +46,9 @@ function serveStatic(dir: string, req: http.IncomingMessage, res: http.ServerRes
 
 export function startServer(opts: ServerOptions) {
   const rooms = new Map<string, Room>();
+  const store = new ProfileStore(opts.profilesFile);
+  /** Tokens currently connected, so one profile can't play twice at once. */
+  const online = new Set<string>();
   const staticDir = opts.staticDir && fs.existsSync(opts.staticDir) ? path.resolve(opts.staticDir) : null;
 
   const httpServer = http.createServer((req, res) => {
@@ -73,7 +79,7 @@ export function startServer(opts: ServerOptions) {
         if (msg.t !== 'join') return;
         room = rooms.get(roomName) ?? null;
         if (!room) {
-          room = new Room(roomName, opts.seed ?? Math.floor(Math.random() * 1e9), opts.timings ?? DEFAULT_TIMINGS);
+          room = new Room(roomName, opts.seed ?? Math.floor(Math.random() * 1e9), opts.timings ?? DEFAULT_TIMINGS, store);
           rooms.set(roomName, room);
           room.start();
         }
@@ -82,7 +88,14 @@ export function startServer(opts: ServerOptions) {
           ws.close();
           return;
         }
-        player = room.addPlayer({ send: (d) => ws.readyState === ws.OPEN && ws.send(d) }, msg.name);
+        const { token, profile } = store.get(msg.token, typeof msg.name === 'string' ? msg.name.trim().slice(0, 16) : '');
+        if (online.has(token)) {
+          ws.send(JSON.stringify({ t: 'error', message: '이 계정은 이미 다른 창에서 접속 중이에요.' }));
+          ws.close();
+          return;
+        }
+        online.add(token);
+        player = room.addPlayer({ send: (d) => ws.readyState === ws.OPEN && ws.send(d) }, msg.name, token, profile);
         return;
       }
       room?.handle(player, msg);
@@ -90,6 +103,7 @@ export function startServer(opts: ServerOptions) {
 
     ws.on('close', () => {
       if (!room || !player) return;
+      online.delete(player.token);
       room.removePlayer(player.id);
       if (room.players.size === 0) {
         room.stop();
@@ -98,15 +112,17 @@ export function startServer(opts: ServerOptions) {
     });
   });
 
-  return new Promise<{ port: number; rooms: Map<string, Room>; close: () => Promise<void> }>((resolve) => {
+  return new Promise<{ port: number; rooms: Map<string, Room>; store: ProfileStore; close: () => Promise<void> }>((resolve) => {
     httpServer.listen(opts.port, () => {
       const addr = httpServer.address();
       resolve({
         port: typeof addr === 'object' && addr ? addr.port : opts.port,
         rooms,
+        store,
         close: () =>
           new Promise<void>((done) => {
             for (const r of rooms.values()) r.stop();
+            store.flush();
             for (const c of wss.clients) c.terminate();
             wss.close();
             httpServer.close(() => done());

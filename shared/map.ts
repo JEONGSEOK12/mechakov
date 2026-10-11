@@ -24,6 +24,10 @@ export interface GameMap {
   solids: Box[];
   hunterSpawns: Vec3[];
   propSpawns: Vec3[];
+  /** Floor zones where props can extract during the hunt. */
+  exits: Box[];
+  /** Places loot can appear: open floor and the tops of low props. */
+  lootSpots: Vec3[];
 }
 
 export function propSize(type: string, rot: 0 | 1 = 0): Vec3 {
@@ -75,6 +79,13 @@ export function generateMap(seed: number): GameMap {
   walls.push({ min: [-6, 0, -12], max: [-5.7, 1.2, -8] });
   walls.push({ min: [5.7, 0, 8], max: [6, 1.2, 12] });
 
+  const exits: Box[] = [
+    { min: [-half, 0, -half], max: [-half + 3, 0.2, -half + 3] },
+    { min: [half - 3, 0, half - 3], max: [half, 0.2, half] },
+    { min: [-half, 0, half - 3], max: [-half + 3, 0.2, half] },
+  ];
+  const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
+
   const props: StaticProp[] = [];
   const propBoxes: Box[] = [];
   const totalWeight = PROP_TYPES.reduce((s, k) => s + PROPS[k].weight, 0);
@@ -91,7 +102,7 @@ export function generateMap(seed: number): GameMap {
       min: [b.min[0] - 0.15, b.min[1], b.min[2] - 0.15],
       max: [b.max[0] + 0.15, b.max[1], b.max[2] + 0.15],
     };
-    return walls.some((w) => overlaps(padded, w)) || propBoxes.some((p) => overlaps(padded, p));
+    return [...walls, ...keepClear, ...propBoxes].some((w) => overlaps(padded, w));
   };
   const add = (type: string, pos: Vec3, rot: 0 | 1) => {
     props.push({ id: props.length, type, pos, rot });
@@ -132,5 +143,24 @@ export function generateMap(seed: number): GameMap {
     propSpawns.push(pos);
   }
 
-  return { seed, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns };
+  const lootSpots: Vec3[] = [];
+  for (const b of propBoxes) {
+    const top = b.max[1];
+    const center: Vec3 = [(b.min[0] + b.max[0]) / 2, top, (b.min[2] + b.max[2]) / 2];
+    if (top <= 1.2 && b.max[0] - b.min[0] >= 0.5 && !propBoxes.some((o) => o !== b && overlaps(boxAt(center, [0.3, 0.3, 0.3]), o))) {
+      lootSpots.push(center);
+    }
+  }
+  attempts = 0;
+  let floorSpots = 0;
+  while (floorSpots < 40 && attempts < 3000) {
+    attempts++;
+    const pos: Vec3 = [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
+    if (Math.abs(pos[0]) < CLEAR_ZONE && Math.abs(pos[2]) < CLEAR_ZONE) continue;
+    if ([...solids, ...keepClear].some((s) => overlaps(boxAt(pos, [0.6, 0.6, 0.6]), s))) continue;
+    lootSpots.push(pos);
+    floorSpots++;
+  }
+
+  return { seed, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots };
 }

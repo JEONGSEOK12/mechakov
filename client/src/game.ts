@@ -1,14 +1,17 @@
 import * as THREE from 'three';
-import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, TICK_DT } from '../../shared/constants.ts';
+import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, type GameMap } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
+import { ITEMS } from '../../shared/items.ts';
 import { PROPS } from '../../shared/props.ts';
-import type { ClientMsg, PlayerSnap, ServerMsg } from '../../shared/protocol.ts';
+import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg } from '../../shared/protocol.ts';
+import { canDisguiseAs, type Profile } from '../../shared/upgrades.ts';
 import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
+import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
-import { buildWorld, createHunterMesh, createPropMesh, type World } from './meshes.ts';
+import { buildExits, buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Net } from './net.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
@@ -74,12 +77,24 @@ export class Game {
   private spectateIndex = 0;
   private scoreboardOpen = false;
   private disguiseTarget: number | null = null;
+  /** A prop in reach that the disguise catalog doesn't unlock yet. */
+  private disguiseLocked: number | null = null;
   private highlight = new THREE.Box3Helper(new THREE.Box3(), 0xffd27a);
   private tracers: { line: THREE.Line; until: number }[] = [];
 
-  constructor(private net: Net, private myId: number, seed: number) {
+  // Raid and hideout state.
+  private hideout = new Hideout();
+  private bag: string[] = [];
+  private bagCapacity = 3;
+  private loot = new Map<number, { data: Loot; mesh: THREE.Object3D }>();
+  private pickupTarget: number | null = null;
+  private result: { outcome: Outcome; items: string[] } | null = null;
+  private lastHideoutRender = 0;
+
+  constructor(private net: Net, private myId: number, seed: number, private profile: Profile) {
     this.map = generateMap(seed);
     this.world = buildWorld(this.scene, this.map);
+    buildExits(this.scene, this.map);
     this.highlight.visible = false;
     this.scene.add(this.highlight);
 
@@ -103,6 +118,14 @@ export class Game {
     this.controls.onScoreboard = (show) => {
       this.scoreboardOpen = show;
     };
+    this.controls.onPickup = () => {
+      if (this.pickupTarget !== null) this.net.send({ t: 'pickup', lootId: this.pickupTarget });
+    };
+    this.controls.onHideout = () => {
+      this.hideout.toggle();
+      this.renderHideout();
+    };
+    this.hideout.onUpgrade = (id) => this.net.send({ t: 'upgrade', id });
 
     net.onMessage = (msg) => this.onMessage(msg);
     net.onClose = () => this.hud.center('서버와 연결이 끊겼어요. 새로고침해 주세요.');
@@ -145,6 +168,20 @@ export class Game {
       case 'roundEnd':
         this.winner = msg.winner;
         break;
+      case 'profile':
+        this.profile = msg.profile;
+        this.renderHideout();
+        break;
+      case 'bag':
+        this.bag = msg.items;
+        this.bagCapacity = msg.capacity;
+        break;
+      case 'loot':
+        this.syncLoot(msg.items);
+        break;
+      case 'result':
+        this.result = { outcome: msg.outcome, items: msg.items };
+        break;
     }
   }
 
@@ -168,7 +205,7 @@ export class Game {
     this.pending = this.pending.filter((i) => i.seq > me.seq);
     const frozen = this.phase === 'hide' && me.role === 'hunter';
     for (const i of this.pending) {
-      stepBody(this.body, me.role, me.prop, i.keys, i.yaw, frozen, TICK_DT, this.map.solids);
+      stepBody(this.body, me.role, me.prop, i.keys, i.yaw, frozen, TICK_DT, this.map.solids, me.speed);
     }
     const p = this.body.pos;
     const teleported = !before || !prevMe?.alive || prevMe.role !== me.role ||
@@ -201,7 +238,7 @@ export class Game {
     const me = this.me;
     if (!this.body || !me) return;
     this.prevPos = [...this.body.pos];
-    stepBody(this.body, me.role, me.prop, keys, yaw, this.phase === 'hide' && me.role === 'hunter', TICK_DT, this.map.solids);
+    stepBody(this.body, me.role, me.prop, keys, yaw, this.phase === 'hide' && me.role === 'hunter', TICK_DT, this.map.solids, me.speed);
     this.pending.push(input);
   }
 
@@ -307,6 +344,13 @@ export class Game {
 
     this.updateCamera(me, myPos, players);
     this.updateDisguiseTarget(me, myPos);
+    this.updatePickupTarget(me, myPos);
+    for (const { mesh } of this.loot.values()) {
+      const spin = mesh.userData.spin as THREE.Object3D;
+      spin.rotation.y = now / 600;
+      spin.position.y = 0.25 + Math.sin(now / 300) * 0.04;
+    }
+    if (this.hideout.open && now - this.lastHideoutRender > 500) this.renderHideout();
     this.updateHud(me);
 
     for (const t of this.tracers) {
@@ -355,6 +399,7 @@ export class Game {
 
   private updateDisguiseTarget(me: PlayerSnap | undefined, myPos: THREE.Vector3 | null) {
     this.disguiseTarget = null;
+    this.disguiseLocked = null;
     this.highlight.visible = false;
     if (!me || !myPos || me.role !== 'prop' || this.phase === 'end') return;
     const fwd = new THREE.Vector3(...lookDir(this.controls.yaw, this.controls.pitch));
@@ -366,6 +411,10 @@ export class Game {
     const size = bodySize(me.role, me.prop);
     const center = myPos.clone().add(new THREE.Vector3(0, size[1] / 2, 0));
     if (center.distanceTo(hit.point) > DISGUISE_RANGE) return;
+    if (!canDisguiseAs(this.profile, this.map.props[id].type)) {
+      this.disguiseLocked = id;
+      return;
+    }
     this.disguiseTarget = id;
     this.highlight.box.setFromObject(hit.object);
     this.highlight.visible = true;
@@ -385,10 +434,67 @@ export class Game {
     }
     else this.hud.center('');
 
-    let hint = '';
-    if (this.disguiseTarget !== null) hint = `E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`;
+    const inRaid = !!me?.alive && me.role !== 'spectator' && (this.phase === 'hide' || this.phase === 'hunt');
+    this.hud.bag(this.bag, this.bagCapacity, inRaid);
+    this.hud.extract(me?.alive ? me.extracting : 0);
+    if (this.phase === 'lobby' || this.phase === 'countdown' || this.phase === 'hide') this.result = null;
+    this.hud.result(this.result?.outcome ?? null, this.result?.items ?? []);
+
+    const hints: string[] = [];
+    if (this.pickupTarget !== null) {
+      const name = ITEMS[this.loot.get(this.pickupTarget)!.data.type].name;
+      hints.push(this.bag.length >= this.bagCapacity ? `가방이 가득 찼어요 (${name})` : `F: ${name} 줍기`);
+    }
+    if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
+    if (this.disguiseLocked !== null) hints.push(`${PROPS[this.map.props[this.disguiseLocked].type].name}: 변신 도감 업그레이드 필요`);
+    let hint = hints.join(' · ');
     if (me?.role === 'prop' && me.alive && this.faceLocked) hint += `${hint ? ' · ' : ''}방향 고정됨 (R)`;
-    if (!this.controls.locked) hint = '화면을 클릭하면 조작을 시작해요';
+    if (!this.controls.locked && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';
     this.hud.hint(hint);
+  }
+
+  private canUpgradeNow() {
+    const me = this.me;
+    if (!me) return false;
+    return !(me.alive && me.role !== 'spectator' && (this.phase === 'hide' || this.phase === 'hunt'));
+  }
+
+  private renderHideout() {
+    if (!this.hideout.open) return;
+    this.lastHideoutRender = performance.now();
+    this.hideout.render(this.profile, this.canUpgradeNow());
+  }
+
+  private syncLoot(items: Loot[]) {
+    const ids = new Set(items.map((i) => i.id));
+    for (const [id, l] of this.loot) {
+      if (!ids.has(id)) {
+        this.scene.remove(l.mesh);
+        this.loot.delete(id);
+      }
+    }
+    for (const item of items) {
+      if (this.loot.has(item.id)) continue;
+      const mesh = createLootMesh(item.type);
+      mesh.position.set(...item.pos);
+      this.scene.add(mesh);
+      this.loot.set(item.id, { data: item, mesh });
+    }
+  }
+
+  private updatePickupTarget(me: PlayerSnap | undefined, myPos: THREE.Vector3 | null) {
+    this.pickupTarget = null;
+    if (!me || !myPos || me.role !== 'prop' || (this.phase !== 'hide' && this.phase !== 'hunt')) return;
+    const size = bodySize(me.role, me.prop);
+    const center = myPos.clone().add(new THREE.Vector3(0, size[1] / 2, 0));
+    // Stay a little inside the server's range so a pickup isn't refused over lag.
+    let best = PICKUP_RANGE + Math.max(...size) / 2 - 0.2;
+    for (const { data } of this.loot.values()) {
+      const d = center.distanceTo(new THREE.Vector3(...data.pos));
+      if (d < best) {
+        best = d;
+        this.pickupTarget = data.id;
+      }
+    }
   }
 }

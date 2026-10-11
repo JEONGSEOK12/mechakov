@@ -10,6 +10,8 @@ export class Controls {
 
   onShoot: () => void = () => {};
   onDisguise: () => void = () => {};
+  onPickup: () => void = () => {};
+  onHideout: () => void = () => {};
   onToggleRotationLock: () => void = () => {};
   onScoreboard: (show: boolean) => void = () => {};
 
@@ -46,6 +48,8 @@ export class Controls {
       case 'ShiftLeft': case 'ShiftRight': this.keys.sprint = down; break;
       case 'KeyE': if (down && !e.repeat) this.onDisguise(); break;
       case 'KeyR': if (down && !e.repeat) this.onToggleRotationLock(); break;
+      case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
+      case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
       case 'Tab': this.onScoreboard(down); break;
       default: return;
     }

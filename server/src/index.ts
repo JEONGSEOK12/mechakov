@@ -6,5 +6,11 @@ import { startServer } from './server.ts';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const port = Number(process.env.PORT) || DEFAULT_PORT;
 
-const server = await startServer({ port, staticDir: path.join(root, 'dist') });
+const server = await startServer({
+  port,
+  staticDir: path.join(root, 'dist'),
+  profilesFile: process.env.PROFILES_FILE ?? path.join(root, 'data', 'profiles.json'),
+});
+process.on('SIGINT', () => server.close().then(() => process.exit(0)));
+process.on('SIGTERM', () => server.close().then(() => process.exit(0)));
 console.log(`mechakov server listening on http://localhost:${server.port}`);

@@ -80,6 +80,7 @@ export function stepBody(
   frozen: boolean,
   dt: number,
   solids: Box[],
+  speedMult = 1,
 ) {
   const size = bodySize(role, prop);
   let mx = 0;
@@ -89,7 +90,7 @@ export function stepBody(
     const side = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
     const len = Math.hypot(fwd, side);
     if (len > 0) {
-      const speed = (role === 'prop' ? PROP_SPEED : HUNTER_SPEED) * (keys.sprint ? SPRINT_MULT : 1);
+      const speed = (role === 'prop' ? PROP_SPEED : HUNTER_SPEED) * (keys.sprint ? SPRINT_MULT : 1) * speedMult;
       const f = fwd / len;
       const s = side / len;
       mx = (-Math.sin(yaw) * f + Math.cos(yaw) * s) * speed * dt;

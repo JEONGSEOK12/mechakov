@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
 import WebSocket from 'ws';
-import { HUNTER_EYE, MAX_HP, SHOT_DAMAGE } from '../shared/constants.ts';
+import { HUNTER_EYE, SHOT_DAMAGE } from '../shared/constants.ts';
 import { boxAt } from '../shared/geometry.ts';
+import { PROPS } from '../shared/props.ts';
 import type { ServerMsg } from '../shared/protocol.ts';
 import { startServer } from '../server/src/server.ts';
 
-const server = await startServer({ port: 0, seed: 7, timings: { countdown: 0.2, hide: 0.3, hunt: 30, end: 0.3 } });
+const server = await startServer({ port: 0, seed: 7, timings: { countdown: 0.2, hide: 0.3, hunt: 30, end: 0.3, extract: 0.3 } });
+const MAX_HP = 100;
 after(() => server.close());
 
 class Client {
@@ -99,7 +101,7 @@ test('props can disguise only as a prop within reach', async () => {
   await a.waitFor(isPhase('lobby'));
   const room = server.rooms.get('disguise')!;
   const me = room.players.get(a.id)!;
-  const target = room.map.props.find((p) => p.type !== 'smallBox' && p.pos[1] === 0)!;
+  const target = room.map.props.find((p) => p.type !== 'smallBox' && PROPS[p.type].tier === 0 && p.pos[1] === 0)!;
 
   me.body.pos = [target.pos[0] + 20, 0, target.pos[2]];
   room.handle(me, { t: 'disguise', propId: target.id });
