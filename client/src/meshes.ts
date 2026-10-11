@@ -60,16 +60,26 @@ function propMaterial(type: string): THREE.Material {
 }
 
 /** A prop with its origin at its bottom center. Players disguised as it use the exact same mesh. */
+const geometries = new Map<string, THREE.BufferGeometry>();
+
+/** One geometry per prop type, shared by every mesh of that type (maps have hundreds). */
+function propGeometry(type: string): THREE.BufferGeometry {
+  let geo = geometries.get(type);
+  if (!geo) {
+    const def = PROPS[type];
+    const [w, h, d] = def.size;
+    if (def.shape === 'box') geo = new THREE.BoxGeometry(w, h, d);
+    else if (def.shape === 'cone') geo = new THREE.ConeGeometry(w / 2, h, 16);
+    else if (type === 'tire') geo = new THREE.TorusGeometry(w / 2 - h / 2, h / 2, 10, 20).rotateX(Math.PI / 2);
+    else geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 18);
+    geo.translate(0, h / 2, 0);
+    geometries.set(type, geo);
+  }
+  return geo;
+}
+
 export function createPropMesh(type: string): THREE.Object3D {
-  const def = PROPS[type];
-  const [w, h, d] = def.size;
-  let geo: THREE.BufferGeometry;
-  if (def.shape === 'box') geo = new THREE.BoxGeometry(w, h, d);
-  else if (def.shape === 'cone') geo = new THREE.ConeGeometry(w / 2, h, 16);
-  else if (type === 'tire') geo = new THREE.TorusGeometry(w / 2 - h / 2, h / 2, 10, 20).rotateX(Math.PI / 2);
-  else geo = new THREE.CylinderGeometry(w / 2, w / 2, h, 18);
-  geo.translate(0, h / 2, 0);
-  const mesh = new THREE.Mesh(geo, propMaterial(type));
+  const mesh = new THREE.Mesh(propGeometry(type), propMaterial(type));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
@@ -95,7 +105,6 @@ export function createHunterMesh(color = 0xd24b3a): THREE.Object3D {
 export interface World {
   /** Everything the camera and the disguise picker can hit. */
   colliders: THREE.Object3D[];
-  propMeshes: THREE.Object3D[];
 }
 
 interface Palette {
@@ -162,7 +171,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
       ? [-r, 0, r].flatMap((x) => [-r, 0, r].map((z) => [x, z]))
       : [[-r, -r], [r, -r], [-r, r], [r, r], [0, 0]];
     for (const [x, z] of spots) {
-      const lamp = new THREE.PointLight(0xffe2b0, 18, map.half > 20 ? 22 : 16, 1.6);
+      const lamp = new THREE.PointLight(0xffe2b0, map.half > 20 ? 40 : 18, map.half > 20 ? map.half * 0.8 : 16, 1.6);
       lamp.position.set(x, 5.2, z);
       root.add(lamp);
     }
@@ -191,15 +200,25 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
     colliders.push(mesh);
   });
 
-  const propMeshes: THREE.Object3D[] = [];
-  for (const p of map.props) {
-    const mesh = createPropMesh(p.type);
-    mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
-    mesh.rotation.y = (p.rot * Math.PI) / 2;
-    mesh.userData.propId = p.id;
+  // One instanced mesh per prop type: maps have hundreds of props.
+  const byType = new Map<string, typeof map.props>();
+  for (const p of map.props) byType.set(p.type, [...(byType.get(p.type) ?? []), p]);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const one = new THREE.Vector3(1, 1, 1);
+  for (const [type, list] of byType) {
+    const mesh = new THREE.InstancedMesh(propGeometry(type), propMaterial(type), list.length);
+    list.forEach((p, i) => {
+      q.setFromAxisAngle(up, (p.rot * Math.PI) / 2);
+      mesh.setMatrixAt(i, m.compose(new THREE.Vector3(...p.pos), q, one));
+    });
+    mesh.computeBoundingSphere();
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.propIds = list.map((p) => p.id);
     root.add(mesh);
     colliders.push(mesh);
-    propMeshes.push(mesh);
   }
   buildExits(root, map);
   if (map.stations) {
@@ -209,7 +228,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
       root.add(label);
     }
   }
-  return { colliders, propMeshes };
+  return { colliders };
 }
 
 /** A small glowing pickup. Origin at its bottom. */

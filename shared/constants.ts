@@ -37,7 +37,7 @@ export interface Timings {
 export const DEFAULT_TIMINGS: Timings = {
   countdown: 5,
   hide: 40,
-  hunt: 240,
+  hunt: 300,
   end: 8,
   extract: 5,
 };

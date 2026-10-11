@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
-import { generateMap, STATION_RANGE, THEME_NAMES, type GameMap, type Station } from '../../shared/map.ts';
+import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
 import { ITEMS } from '../../shared/items.ts';
 import { PROPS, type Theme } from '../../shared/props.ts';
@@ -513,7 +513,8 @@ export class Game {
     this.raycaster.set(this.camera.position, fwd);
     this.raycaster.far = 20;
     const hit = this.raycaster.intersectObjects(this.world.colliders, false)[0];
-    const id = hit?.object.userData.propId as number | undefined;
+    const ids = hit?.object.userData.propIds as number[] | undefined;
+    const id = ids && hit?.instanceId !== undefined ? ids[hit.instanceId] : undefined;
     if (!hit || id === undefined) return;
     const size = bodySize(me.role, me.prop);
     const center = myPos.clone().add(new THREE.Vector3(0, size[1] / 2, 0));
@@ -523,7 +524,9 @@ export class Game {
       return;
     }
     this.disguiseTarget = id;
-    this.highlight.box.setFromObject(hit.object);
+    const box = this.map.propBoxes[id];
+    this.highlight.box.min.set(...box.min);
+    this.highlight.box.max.set(...box.max);
     this.highlight.visible = true;
   }
 
@@ -532,6 +535,9 @@ export class Game {
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart);
     this.hud.me(me, this.phase, !!this.map.stations);
     this.hud.stamina(this.body ? this.body.stamina : null, !!this.body?.winded);
+    const at = this.body?.pos ?? [this.camera.position.x, 0, this.camera.position.z];
+    const zone = this.map.theme === 'hideout' ? null : zoneAt(this.map, at[0], at[2]);
+    this.hud.zone(zone?.name ?? '');
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
     this.hud.inventory(this.inventoryOpen, {
       bag: this.bag,
