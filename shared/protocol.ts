@@ -27,6 +27,15 @@ export interface PlayerSnap {
   seq: number;
 }
 
+/** Who is in the room, without positions; everyone gets the full list. */
+export interface RosterEntry {
+  id: number;
+  name: string;
+  role: Role;
+  alive: boolean;
+  extracted: boolean;
+}
+
 export interface Loot {
   id: number;
   type: string;
@@ -54,7 +63,8 @@ export type ServerMsg =
   | { t: 'loot'; items: Loot[] }
   | { t: 'bag'; items: string[]; capacity: number }
   | { t: 'result'; outcome: Outcome; items: string[] }
-  | { t: 'snap'; time: number; phase: Phase; timeLeft: number; players: PlayerSnap[] }
+  /** `players` holds only the players the receiver is allowed to see. */
+  | { t: 'snap'; time: number; phase: Phase; timeLeft: number; players: PlayerSnap[]; roster: RosterEntry[] }
   | { t: 'shot'; from: number; origin: Vec3; end: Vec3; hit: ShotHit; target?: number }
   | { t: 'kill'; killer: number | null; victim: number }
   | { t: 'roundEnd'; winner: Team | null }

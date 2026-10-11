@@ -1,5 +1,5 @@
 import { ITEMS } from '../../shared/items.ts';
-import type { Outcome, PlayerSnap } from '../../shared/protocol.ts';
+import type { Outcome, PlayerSnap, RosterEntry } from '../../shared/protocol.ts';
 import type { Phase, Team } from '../../shared/types.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -124,14 +124,16 @@ export class Hud {
     this.flash('damage-flash');
   }
 
-  scoreboard(show: boolean, players: PlayerSnap[], myId: number) {
+  scoreboard(show: boolean, players: RosterEntry[], visible: Map<number, PlayerSnap>, myId: number) {
     const el = $('scoreboard');
     el.classList.toggle('hidden', !show);
     if (!show) return;
-    const section = (title: string, list: PlayerSnap[]) =>
+    // Only your own HP: other players' numbers would hint at who is in view.
+    const status = (p: RosterEntry) => (p.extracted ? '탈출' : !p.alive ? '사망' : p.id === myId ? visible.get(p.id)?.hp ?? '' : '생존');
+    const section = (title: string, list: RosterEntry[]) =>
       list.length === 0 ? '' :
       `<h3>${title}</h3>` + list.map((p) =>
-        `<div class="row ${p.alive ? '' : 'dead'}"><span>${escape(p.name)}${p.id === myId ? ' (나)' : ''}</span><span>${p.alive ? p.hp : '사망'}</span></div>`,
+        `<div class="row ${p.alive ? '' : 'dead'}"><span>${escape(p.name)}${p.id === myId ? ' (나)' : ''}</span><span>${status(p)}</span></div>`,
       ).join('');
     el.innerHTML =
       section('헌터', players.filter((p) => p.role === 'hunter')) +

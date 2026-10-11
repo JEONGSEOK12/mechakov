@@ -5,7 +5,7 @@ import { generateMap, THEME_NAMES, type GameMap } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
 import { ITEMS } from '../../shared/items.ts';
 import { PROPS, type Theme } from '../../shared/props.ts';
-import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg } from '../../shared/protocol.ts';
+import type { ClientMsg, Loot, Outcome, PlayerSnap, RosterEntry, ServerMsg } from '../../shared/protocol.ts';
 import { canDisguiseAs, type Profile } from '../../shared/upgrades.ts';
 import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
@@ -56,6 +56,7 @@ export class Game {
 
   private snaps: Snapshot[] = [];
   private latest = new Map<number, PlayerSnap>();
+  private roster = new Map<number, RosterEntry>();
   private phase: Phase = 'lobby';
   private timeLeft = 0;
   private timeAt = 0;
@@ -165,7 +166,7 @@ export class Game {
         if (msg.target === this.myId || (msg.from === this.myId && msg.hit === 'decoy')) this.hud.damaged();
         break;
       case 'kill': {
-        const name = (id: number | null) => (id === null ? null : this.latest.get(id)?.name ?? '???');
+        const name = (id: number | null) => (id === null ? null : this.roster.get(id)?.name ?? '???');
         const killer = name(msg.killer);
         this.hud.kill(killer ? `${killer} ▸ ${name(msg.victim)}` : `${name(msg.victim)} (가짜 사물을 너무 많이 쏨)`);
         break;
@@ -201,6 +202,7 @@ export class Game {
     this.timeLeft = msg.timeLeft;
     this.timeAt = performance.now();
     this.latest = new Map(msg.players.map((p) => [p.id, p]));
+    this.roster = new Map(msg.roster.map((p) => [p.id, p]));
     this.snaps.push({ at: this.timeAt, players: this.latest });
     while (this.snaps.length > 30) this.snaps.shift();
 
@@ -435,7 +437,7 @@ export class Game {
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme]);
     this.hud.me(me, this.phase);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
-    this.hud.scoreboard(this.scoreboardOpen, [...this.latest.values()], this.myId);
+    this.hud.scoreboard(this.scoreboardOpen, [...this.roster.values()], this.latest, this.myId);
 
     if (this.phase === 'end') this.hud.roundEnd(this.winner);
     else if (this.phase === 'countdown') this.hud.center(`라운드 시작까지 ${Math.ceil(left)}`);

@@ -138,6 +138,6 @@ test('bots play props: they hide as a prop, and the person is the hunter', () =>
   // Give them a long hiding phase to walk over and disguise.
   room.phaseEnds = room.time + 20;
   for (let i = 0; i < 15 / TICK_DT; i++) room.tick();
-  const disguised = bots.filter((b) => b.prop !== 'smallBox');
-  assert.ok(disguised.length >= 2, `${disguised.length} of 3 bots disguised`);
+  const hidden = bots.filter((b) => b.bot!.isHidden);
+  assert.equal(hidden.length, 3, `${hidden.length} of 3 bots hidden`);
 });
