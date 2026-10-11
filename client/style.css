@@ -38,6 +38,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
 #role { font-weight: 700; font-size: 18px; margin-bottom: 6px; text-shadow: 0 1px 2px #000; }
 #hp-bar { height: 12px; background: rgba(0, 0, 0, 0.5); border-radius: 6px; overflow: hidden; }
 #hp-fill { height: 100%; width: 100%; background: #4cd964; transition: width 0.15s; }
+#stamina-bar { max-width: 220px; height: 6px; margin-top: 4px; background: rgba(0, 0, 0, 0.5); border-radius: 3px; overflow: hidden; }
+#stamina-fill { height: 100%; width: 100%; background: #f5d76e; }
+#stamina-bar.winded #stamina-fill { background: #ff8a5c; }
 #help { position: absolute; right: 16px; bottom: 16px; text-align: right; font-size: 12px; color: #ccc;
   text-shadow: 0 1px 2px #000; line-height: 1.6; }
 #center-msg { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font-size: 36px;

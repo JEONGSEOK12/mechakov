@@ -1,5 +1,6 @@
 import {
-  GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, PROP_SPEED, SPRINT_MULT, STEP_HEIGHT,
+  GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, PROP_SPEED, SPRINT_MULT, SPRINT_SECONDS, STAMINA_REFILL_SECONDS,
+  STEP_HEIGHT, WINDED_UNTIL,
 } from './constants.ts';
 import { boxAt, overlaps } from './geometry.ts';
 import { propSize } from './map.ts';
@@ -10,7 +11,13 @@ export interface BodyState {
   pos: Vec3;
   vy: number;
   onGround: boolean;
+  /** 0..1, spent by sprinting. */
+  stamina: number;
+  /** Ran out of stamina and hasn't refilled to WINDED_UNTIL yet. */
+  winded: boolean;
 }
+
+export const newBody = (pos: Vec3): BodyState => ({ pos, vy: 0, onGround: false, stamina: 1, winded: false });
 
 export function bodySize(role: Role, prop: string | null): Vec3 {
   if (role === 'prop' && prop) return propSize(prop);
@@ -85,12 +92,14 @@ export function stepBody(
   const size = bodySize(role, prop);
   let mx = 0;
   let mz = 0;
+  let sprinting = false;
   if (!frozen) {
     const fwd = (keys.f ? 1 : 0) - (keys.b ? 1 : 0);
     const side = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
     const len = Math.hypot(fwd, side);
     if (len > 0) {
-      const speed = (role === 'prop' ? PROP_SPEED : HUNTER_SPEED) * (keys.sprint ? SPRINT_MULT : 1) * speedMult;
+      sprinting = keys.sprint && !b.winded && b.stamina > 0;
+      const speed = (role === 'prop' ? PROP_SPEED : HUNTER_SPEED) * (sprinting ? SPRINT_MULT : 1) * speedMult;
       const f = fwd / len;
       const s = side / len;
       mx = (-Math.sin(yaw) * f + Math.cos(yaw) * s) * speed * dt;
@@ -100,6 +109,13 @@ export function stepBody(
       b.vy = JUMP_SPEED;
       b.onGround = false;
     }
+  }
+  if (sprinting) {
+    b.stamina = Math.max(0, b.stamina - dt / SPRINT_SECONDS);
+    if (b.stamina === 0) b.winded = true;
+  } else {
+    b.stamina = Math.min(1, b.stamina + dt / STAMINA_REFILL_SECONDS);
+    if (b.stamina >= WINDED_UNTIL) b.winded = false;
   }
   b.vy -= GRAVITY * dt;
   moveHorizontal(b, size, 0, mx, solids);

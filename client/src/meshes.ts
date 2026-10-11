@@ -144,7 +144,8 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   root.clear();
   const pal = PALETTES[map.theme];
   scene.background = new THREE.Color(pal.sky);
-  scene.fog = new THREE.Fog(pal.sky, map.theme === 'yard' ? 40 : 25, map.theme === 'yard' ? 100 : 60);
+  const fogScale = Math.max(1, map.half / 20);
+  scene.fog = new THREE.Fog(pal.sky, (map.theme === 'yard' ? 40 : 25) * fogScale, (map.theme === 'yard' ? 100 : 60) * fogScale);
 
   root.add(new THREE.HemisphereLight(0xbcd3ff, 0x5a5040, pal.ambient));
   const sun = new THREE.DirectionalLight(0xfff1dc, map.theme === 'yard' ? 2.4 : 1.6);
@@ -155,10 +156,13 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 80 });
   root.add(sun);
   if (pal.lamps) {
-    // Ceiling lamps for some local light pools.
-    const r = Math.min(8, map.half - 3);
-    for (const [x, z] of [[-r, -r], [r, -r], [-r, r], [r, r], [0, 0]]) {
-      const lamp = new THREE.PointLight(0xffe2b0, 18, 16, 1.6);
+    // Ceiling lamps for some local light pools: a 3x3 grid on big maps, corners and middle on small ones.
+    const r = map.half > 20 ? map.half * 0.6 : Math.min(8, map.half - 3);
+    const spots = map.half > 20
+      ? [-r, 0, r].flatMap((x) => [-r, 0, r].map((z) => [x, z]))
+      : [[-r, -r], [r, -r], [-r, r], [r, r], [0, 0]];
+    for (const [x, z] of spots) {
+      const lamp = new THREE.PointLight(0xffe2b0, 18, map.half > 20 ? 22 : 16, 1.6);
       lamp.position.set(x, 5.2, z);
       root.add(lamp);
     }

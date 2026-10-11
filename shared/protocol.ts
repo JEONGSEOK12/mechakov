@@ -18,6 +18,8 @@ export interface PlayerSnap {
   pos: Vec3;
   vy: number;
   onGround: boolean;
+  stamina: number;
+  winded: boolean;
   yaw: number;
   pitch: number;
   /** Body facing; differs from yaw when a prop locks its rotation. */

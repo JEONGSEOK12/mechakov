@@ -8,9 +8,15 @@ export const TICK_DT = 1 / TICK_RATE;
 export const GRAVITY = 24;
 export const JUMP_SPEED = 8;
 export const STEP_HEIGHT = 0.4;
-export const HUNTER_SPEED = 5.5;
-export const PROP_SPEED = 5;
-export const SPRINT_MULT = 1.5;
+export const HUNTER_SPEED = 4;
+export const PROP_SPEED = 3.6;
+export const SPRINT_MULT = 1.6;
+/** Full stamina lasts this many seconds of sprinting... */
+export const SPRINT_SECONDS = 6;
+/** ...and refills from empty in this many seconds of not sprinting. */
+export const STAMINA_REFILL_SECONDS = 9;
+/** Once out of breath, sprinting comes back only after refilling to this much. */
+export const WINDED_UNTIL = 0.35;
 
 export const HUNTER_SIZE: Vec3 = [0.6, 1.8, 0.6];
 export const HUNTER_EYE = 1.6;
@@ -30,8 +36,8 @@ export interface Timings {
 
 export const DEFAULT_TIMINGS: Timings = {
   countdown: 5,
-  hide: 30,
-  hunt: 180,
+  hide: 40,
+  hunt: 240,
   end: 8,
   extract: 5,
 };

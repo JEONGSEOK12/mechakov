@@ -57,6 +57,14 @@ export class Hud {
     $('crosshair').classList.toggle('hidden', !(me.alive && me.role === 'hunter'));
   }
 
+  /** Sprint stamina, 0..1; orange while out of breath. Hidden when not moving around. */
+  stamina(value: number | null, winded: boolean) {
+    const bar = $('stamina-bar');
+    bar.classList.toggle('hidden', value === null);
+    bar.classList.toggle('winded', winded);
+    $('stamina-fill').style.width = `${(value ?? 0) * 100}%`;
+  }
+
   blind(show: boolean, timeLeft: number) {
     $('blind').classList.toggle('show', show);
     if (show) $('blind-text').innerHTML = `프롭들이 숨고 있어요<br>${Math.ceil(timeLeft)}`;
