@@ -8,7 +8,8 @@
     "build": "vite build",
     "start": "tsx server/src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "build:web": "VITE_SOLO_ONLY=1 vite build --outDir ../dist-web --base ./ && node scripts/single-file.mjs"
   },
   "dependencies": {
     "three": "^0.186.1",

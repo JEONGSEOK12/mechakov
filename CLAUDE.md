@@ -7,3 +7,4 @@
 - UI text is Korean.
 - Testing alone: press B in the lobby to add prop bots (`server/src/bot.ts`); with bots the person is always the hunter.
 - `tests/physics.test.ts` flood-fills every map to check spawns and exits are reachable; keep it passing when changing map layouts.
+- Solo mode runs `Room` in the browser (`client/src/local.ts`), so `server/src/room.ts` must stay free of Node-only imports. `npm run build:web` makes the single-file solo page published as a claude.ai artifact (https://claude.ai/artifact/HNCrFpqRfUqzo3xroXEpfe); republish it after gameplay changes.

@@ -1,6 +1,14 @@
 import type { ClientMsg, ServerMsg } from '../../shared/protocol.ts';
 
-export class Net {
+/** What the game talks to: a real server over WebSocket, or the in-browser one. */
+export interface Connection {
+  onMessage: (msg: ServerMsg) => void;
+  onClose: () => void;
+  opened(): Promise<void>;
+  send(msg: ClientMsg): void;
+}
+
+export class Net implements Connection {
   private ws: WebSocket;
   onMessage: (msg: ServerMsg) => void = () => {};
   onClose: () => void = () => {};

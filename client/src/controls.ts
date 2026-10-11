@@ -7,6 +7,13 @@ export class Controls {
   yaw = 0;
   pitch = -0.15;
   locked = false;
+  /** Fallback when the page can't lock the mouse: drag to look, click to shoot. */
+  dragMode = false;
+  private dragStart: { x: number; y: number; moved: number } | null = null;
+
+  get active() {
+    return this.locked || this.dragMode;
+  }
 
   onShoot: () => void = () => {};
   onDisguise: () => void = () => {};
@@ -18,12 +25,34 @@ export class Controls {
 
   constructor(private canvas: HTMLElement) {
     canvas.addEventListener('click', () => {
-      if (!this.locked) canvas.requestPointerLock();
+      if (this.locked || this.dragMode) return;
+      try {
+        const result = canvas.requestPointerLock() as unknown;
+        if (result instanceof Promise) result.catch(() => (this.dragMode = true));
+      } catch {
+        this.dragMode = true;
+      }
+    });
+    document.addEventListener('pointerlockerror', () => {
+      this.dragMode = true;
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      if (this.dragMode && e.button === 0) this.dragStart = { x: e.clientX, y: e.clientY, moved: 0 };
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (this.dragMode && this.dragStart && e.button === 0 && this.dragStart.moved < 6) this.onShoot();
+      this.dragStart = null;
     });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === canvas;
     });
     document.addEventListener('mousemove', (e) => {
+      if (this.dragMode && this.dragStart) {
+        this.dragStart.moved += Math.abs(e.movementX) + Math.abs(e.movementY);
+        this.yaw -= e.movementX * SENSITIVITY * 1.5;
+        this.pitch = Math.max(-1.2, Math.min(0.9, this.pitch - e.movementY * SENSITIVITY * 1.5));
+        return;
+      }
       if (!this.locked) return;
       this.yaw -= e.movementX * SENSITIVITY;
       this.pitch = Math.max(-1.2, Math.min(0.9, this.pitch - e.movementY * SENSITIVITY));

@@ -1,5 +1,9 @@
 import { Game } from './game.ts';
-import { Net } from './net.ts';
+import { LocalNet } from './local.ts';
+import { Net, type Connection } from './net.ts';
+
+/** Built for a page with no game server (VITE_SOLO_ONLY=1): only solo play is offered. */
+const SOLO_ONLY = import.meta.env.VITE_SOLO_ONLY === '1';
 
 const form = document.getElementById('join') as HTMLFormElement;
 const nameInput = document.getElementById('name') as HTMLInputElement;
@@ -14,28 +18,19 @@ try {
 }
 roomInput.value = params.get('room') ?? '';
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  error.textContent = '';
-  const name = nameInput.value.trim();
-  // An empty room name means quick play: the server picks a room.
-  const room = roomInput.value.trim();
+function rememberName(name: string) {
   try {
     localStorage.setItem('mechakov:name', name);
   } catch {
     // Storage can be unavailable (private mode); the name just won't be remembered.
   }
-  const net = new Net(room);
-  try {
-    await net.opened();
-  } catch (err) {
-    error.textContent = (err as Error).message;
-    return;
-  }
+}
+
+function play(net: Connection, name: string, token?: string) {
   net.onMessage = (msg) => {
     if (msg.t === 'welcome') {
       try {
-        localStorage.setItem('mechakov:token', msg.token);
+        if (net instanceof Net) localStorage.setItem('mechakov:token', msg.token);
       } catch {
         // Without storage the profile only lasts for this visit.
       }
@@ -45,16 +40,47 @@ form.addEventListener('submit', async (e) => {
       error.textContent = msg.message;
     }
   };
+  net.send({ t: 'join', name, token });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (SOLO_ONLY) return;
+  error.textContent = '';
+  const name = nameInput.value.trim();
+  rememberName(name);
+  // An empty room name means quick play: the server picks a room.
+  const net = new Net(roomInput.value.trim());
+  try {
+    await net.opened();
+  } catch (err) {
+    error.textContent = `${(err as Error).message} 서버 없이 하려면 '혼자 하기'를 눌러주세요.`;
+    return;
+  }
   let token: string | undefined;
   try {
     token = localStorage.getItem('mechakov:token') ?? undefined;
   } catch {
     token = undefined;
   }
-  net.send({ t: 'join', name, token });
+  play(net, name, token);
 });
 
-fetch('/rooms')
+document.getElementById('solo')!.addEventListener('click', () => {
+  const name = nameInput.value.trim() || '나';
+  rememberName(name);
+  play(new LocalNet(), name);
+});
+
+if (SOLO_ONLY) {
+  document.getElementById('online-join')!.classList.add('hidden');
+  document.getElementById('solo')!.classList.remove('secondary');
+  nameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('solo')!.click();
+  });
+}
+
+if (!SOLO_ONLY) fetch('/rooms')
   .then((r) => r.json())
   .then((d: { online: number }) => {
     document.getElementById('online')!.textContent = `지금 ${d.online}명 플레이 중`;
