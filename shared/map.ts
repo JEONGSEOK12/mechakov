@@ -1,9 +1,9 @@
 import type { Theme } from './props.ts';
 import { boxAt, overlaps } from './geometry.ts';
-import { Builder, propSize, type Rot, type StaticProp, type Zone } from './layouts.ts';
+import { Builder, propSize, type Area, type Building, type Local, type Rot, type StaticProp, type Zone } from './layouts.ts';
 import type { Box, Vec3 } from './types.ts';
 
-export { propSize, type Rot, type StaticProp, type Zone } from './layouts.ts';
+export { propSize, type Area, type Building, type Rot, type StaticProp, type Zone } from './layouts.ts';
 
 export interface GameMap {
   seed: number;
@@ -25,6 +25,10 @@ export interface GameMap {
   lootSpots: Vec3[];
   /** Named areas, e.g. the office inside the warehouse. */
   zones: Zone[];
+  /** Roads between the areas, drawn on the ground. */
+  roads: Area[];
+  /** Buildings: the client gives each a floor and a roof. */
+  buildings: Building[];
   /** Hideout only: where to stand to use the stash, the workbench and the raid door. */
   stations?: Record<Station, Vec3>;
 }
@@ -49,8 +53,11 @@ const CLEAR_ZONE = 6;
 export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
 export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처' };
 
-/** Raid maps are 100 m across. */
-const HALF = 50;
+/** Raid maps are 180 m across: eight areas around a middle, with roads between. */
+const HALF = 90;
+/** Where the roads run (both ways), and how wide they are. */
+const ROADS = [-30, 30];
+const ROAD_WIDTH = 8;
 
 // Prop groups by what kind of place they belong in.
 const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket', 'paintCan', 'smallBox'];
@@ -63,16 +70,60 @@ const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp', 'v
 const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher'];
 const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier', 'wheelbarrow', 'pipes', 'paintCan'];
 
+/** Where the eight areas around the middle sit: a 3x3 grid split by the roads. */
+const CELL = 62;
+const N: [number, number] = [0, -CELL];
+const NE: [number, number] = [CELL, -CELL];
+const E: [number, number] = [CELL, 0];
+const SE: [number, number] = [CELL, CELL];
+const S: [number, number] = [0, CELL];
+const SW: [number, number] = [-CELL, CELL];
+const W: [number, number] = [-CELL, 0];
+const NW: [number, number] = [-CELL, -CELL];
+
+/** A shipping container (or a trailer), along z if `alongZ`, sometimes stacked two high. */
+function container(L: Local, x: number, z: number, alongZ: boolean, stackChance = 0.3) {
+  const [w, d] = alongZ ? [2.4, 6] : [6, 2.4];
+  L.wall(x - w / 2, z - d / 2, x + w / 2, z + d / 2, L.chance(stackChance) ? 5.2 : 2.6);
+}
+
+/** A cubicle wall (above eye height) along x, with a row of desks backed against it. */
+function cubicles(L: Local, x0: number, x1: number, z: number) {
+  L.wall(x0, z - 0.08, x1, z + 0.08, 1.8);
+  for (let x = x0 + 1.2; x < x1 - 1; x += 3) {
+    if (L.chance(0.75)) L.desk(x, z + 0.6, 0);
+  }
+}
+
+/** Tables with a chair on each side, like a canteen. */
+function tables(L: Local, x0: number, x1: number, z0: number, z1: number, step: number) {
+  for (let x = x0; x <= x1; x += step) {
+    for (let z = z0; z <= z1; z += step) {
+      const t = L.prop('desk', x, z);
+      if (!t) continue;
+      L.prop('chair', x - 0.3, z - 0.8, 0);
+      L.prop('chair', x + 0.3, z + 0.8, 2);
+      if (L.chance(0.3)) L.onTop(t, L.pick(['plant', 'microwave', 'trashCan']));
+    }
+  }
+}
+
+/** Sofas facing each other over a low table. */
+function sofaGroup(L: Local, x: number, z: number) {
+  L.prop('sofa', x, z - 1.4, 0);
+  L.prop('coffeeTable', x, z);
+  L.prop('sofa', x, z + 1.4, 2);
+  if (L.chance(0.5)) L.prop('plant', x + 1.6, z + 1.6);
+}
+
 /**
- * A big warehouse: rows of shelving fill the hall so you can't see far down
- * it, with cross racks breaking up the aisles. Different areas store things
- * differently: general shelving in the middle, tall pallet racking in the
- * east, a fenced small-parts cage and stacked bulk freight in the west. A walled office block sits
- * in one corner (open office, manager's office, break room), a workshop on the
- * west side and a loading dock along the south wall behind a row of racks.
+ * A logistics site: separate buildings around a car park in the middle, with
+ * roads between them. Two rack halls (general shelving, and tall pallet
+ * racking), a bulk freight shed, a workshop with a small-parts cage, an office
+ * block, a loading dock with trailers outside, a container stack and a waste yard.
  */
 function warehouse(b: Builder) {
-  const h = b.half;
+  const H = 6;
   /**
    * Three kinds of shelving, told apart by height (the client draws each its own way):
    * general shelving, tall pallet racking, and low small-parts shelving.
@@ -84,299 +135,311 @@ function warehouse(b: Builder) {
   };
   type Kind = keyof typeof KINDS;
   /** A rack along z at `x`, with goods on the floor along both sides. */
-  const rack = (x: number, z0: number, z1: number, kind: Kind = 'general') => {
+  const rack = (L: Local, x: number, z0: number, z1: number, kind: Kind = 'general') => {
     const k = KINDS[kind];
-    b.wall(x - 0.6, z0, x + 0.6, z1, k.height);
-    b.line(k.floor, x - 1.3, z0 + 0.9, x - 1.3, z1 - 0.9, 1.8, k.fill, 1);
-    b.line(k.floor, x + 1.3, z0 + 0.9, x + 1.3, z1 - 0.9, 1.8, k.fill, 3);
+    L.wall(x - 0.6, z0, x + 0.6, z1, k.height);
+    L.line(k.floor, x - 1.3, z0 + 0.9, x - 1.3, z1 - 0.9, 1.8, k.fill, 1);
+    L.line(k.floor, x + 1.3, z0 + 0.9, x + 1.3, z1 - 0.9, 1.8, k.fill, 3);
   };
   /** A rack along x at `z`. */
-  const rackX = (z: number, x0: number, x1: number, kind: Kind = 'general') => {
+  const rackX = (L: Local, z: number, x0: number, x1: number, kind: Kind = 'general') => {
     const k = KINDS[kind];
-    b.wall(x0, z - 0.6, x1, z + 0.6, k.height);
-    b.line(k.floor, x0 + 0.9, z - 1.3, x1 - 0.9, z - 1.3, 1.8, k.fill, 2);
-    b.line(k.floor, x0 + 0.9, z + 1.3, x1 - 0.9, z + 1.3, 1.8, k.fill, 0);
+    L.wall(x0, z - 0.6, x1, z + 0.6, k.height);
+    L.line(k.floor, x0 + 0.9, z - 1.3, x1 - 0.9, z - 1.3, 1.8, k.fill, 2);
+    L.line(k.floor, x0 + 0.9, z + 1.3, x1 - 0.9, z + 1.3, 1.8, k.fill, 0);
   };
   /** A row of crate stacks, one to three high. */
-  const stacks = (x: number, z0: number, z1: number) => {
+  const stacks = (L: Local, x: number, z0: number, z1: number) => {
     for (let z = z0; z <= z1; z += 1.15) {
-      if (!b.chance(0.85)) continue;
-      let box = b.prop('crate', x, z);
-      const high = b.chance(0.5) ? 3 : b.chance(0.7) ? 2 : 1;
-      for (let i = 1; i < high && box; i++) box = b.onTop(box, 'crate');
+      if (!L.chance(0.85)) continue;
+      let box = L.prop('crate', x, z);
+      const high = L.chance(0.3) ? 3 : L.chance(0.6) ? 2 : 1;
+      for (let i = 1; i < high && box; i++) box = L.onTop(box, 'crate');
     }
   };
 
-  b.zone('보관 창고', -h, -h, h, 34);
-  // Office block in the north-east corner.
-  b.zone('사무 구역', 20, -h, h, -25);
-  b.room(20, -h, h, -25, { w: [-31], s: [27, 42] });
-  b.partitionX(35, -h, -25, [-44, -31]);
-  b.partitionZ(-37.5, 35, h, [42.5]);
-  b.zone('사무실', 20, -h, 35, -25);
-  for (const z of [-46, -41.5, -37]) for (const x of [23, 27, 31]) b.desk(x, z, 0);
-  b.line(['cabinet', 'bookshelf', 'cabinet', 'cooler'], 21, -49.4, 34, -49.4, 1.4, 0.7, 0);
-  b.line(['cabinet', 'plant', 'locker', 'printer'], 20.6, -34, 20.6, -27, 1.6, 0.6, 1);
-  b.prop('whiteboard', 31, -33.2, 0);
-  b.zone('관리자실', 35, -h, h, -37.5);
-  b.desk(42.5, -45, 0);
-  b.line(['bookshelf', 'cabinet', 'plant'], 36.5, -49.4, 48.5, -49.4, 1.2, 0.8, 0);
-  b.prop('sofa', 42.5, -38.9, 2);
-  b.prop('coffeeTable', 42.5, -40.6);
-  b.prop('plant', 36.3, -38.4);
-  b.zone('휴게실', 35, -37.5, h, -25);
-  b.line(['sofa', 'vending', 'cooler'], 37, -26.1, 48, -26.1, 2.2, 0.8, 2);
-  for (const x of [39, 45]) {
-    const t = b.prop('desk', x, -32);
-    if (!t) continue;
-    b.prop('chair', x - 0.3, -32.8, 0);
-    b.prop('chair', x + 0.3, -31.2, 2);
-    if (b.chance(0.5)) b.onTop(t, b.pick(['microwave', 'plant']));
+  // General shelving hall: racks in rows with a cross aisle and a middle aisle.
+  let L = b.at(...N);
+  L.building('일반 창고', -24, -20, 24, 20, { s: [-16, 0, 16], w: [0], e: [0] }, H);
+  for (const x of [-19, -14, -9, 9, 14, 19]) {
+    rack(L, x, -17, -3);
+    rack(L, x, 3, 17);
   }
+  rack(L, 0, -17, -8);
+  rack(L, 0, 8, 16);
+  L.line(STORAGE, -22, -19.2, 22, -19.2, 1.6, 0.5, 0);
+  L.line(['dumpster', 'pallet', 'barrel'], -22, -21.6, 22, -21.6, 4, 0.4, 2);
 
-  // Workshop on the west wall: benches along the north wall, tools along the rest.
-  b.zone('정비실', -h, -24, -32, -6);
-  b.room(-h, -24, -32, -6, { e: [-15], s: [-41] });
-  for (const x of [-47, -43, -39, -35]) b.onTop(b.prop('desk', x, -23.2, 0), b.pick(['toolbox', 'gasCan', 'paintCan']));
-  b.line(WORKSHOP, -49.2, -21, -49.2, -8, 1.6, 0.6, 1);
-  b.line(['tire', 'tire', 'spool', 'barrel'], -33, -22, -33, -18, 1.2, 0.8, 3);
-  b.cluster(['generator', 'toolbox', 'spool'], -41, -14, 2, 3);
+  // Office block: open office, manager's office, break room.
+  L = b.at(...NE);
+  L.building('사무동', -18, -14, 18, 14, { w: [4], s: [-8] }, H);
+  L.partitionX(2, -14, 14, [-8, 6]);
+  L.partitionZ(0, 2, 18, [10]);
+  L.zone('사무실', -18, -14, 2, 14);
+  for (const z of [-10, -4, 2]) for (const x of [-14, -9.5, -5]) L.desk(x, z, 0);
+  L.line(['cabinet', 'bookshelf', 'cabinet', 'cooler'], -17, -13.4, 0, -13.4, 1.4, 0.7, 0);
+  L.line(['cabinet', 'plant', 'locker', 'printer'], -17.4, 9, -17.4, 13, 1.6, 0.6, 1);
+  L.prop('whiteboard', -8, 13.4, 2);
+  L.zone('관리자실', 2, -14, 18, 0);
+  L.desk(10, -9, 0);
+  L.line(['bookshelf', 'cabinet', 'plant'], 3.5, -13.4, 17, -13.4, 1.2, 0.8, 0);
+  L.prop('sofa', 10, -1.4, 2);
+  L.prop('coffeeTable', 10, -3.1);
+  L.zone('휴게실', 2, 0, 18, 14);
+  L.line(['sofa', 'vending', 'cooler'], 4, 12.9, 17, 12.9, 2.2, 0.8, 2);
+  tables(L, 7, 13, 6, 6, 6);
 
-  // Small-parts cage in the north-west: low shelving behind wire fencing.
-  b.zone('부품 창고', -47, -45, -31, -26);
-  b.room(-47, -45, -31, -26, { e: [-35.5], s: [-39] }, 2.5);
-  for (const x of [-44, -40, -36]) rack(x, -43, -29, 'parts');
+  // Workshop with a small-parts cage behind wire fencing.
+  L = b.at(...NW);
+  L.building('정비동', -20, -15, 20, 15, { e: [0], s: [-10, 10] }, H);
+  L.partitionX(0, -15, 15, [-5, 8]);
+  L.zone('정비실', -20, -15, 0, 15);
+  for (const x of [-17, -13, -9, -5]) L.onTop(L.prop('desk', x, -14.2, 0), L.pick(['toolbox', 'gasCan', 'paintCan']));
+  L.line(WORKSHOP, -19.2, -11, -19.2, 12, 1.6, 0.6, 1);
+  L.line(['tire', 'tire', 'spool', 'barrel'], -1.5, -12, -1.5, -8, 1.2, 0.8, 3);
+  L.cluster(['generator', 'toolbox', 'spool'], -10, 4, 2, 3);
+  L.zone('부품 창고', 0, -15, 20, 15);
+  L.room(3, -12, 18, 12, { w: [0], s: [10] }, 2.5);
+  for (const x of [6.5, 10.5, 14.5]) rack(L, x, -10, 9, 'parts');
 
-  // General shelving fills the middle of the hall, three blocks per row with cross aisles between.
-  for (const x of [-27, -22, -17, -12, 12, 17]) {
-    rack(x, -46, -30);
-    rack(x, -25, -10);
-    rack(x, 10, 29);
+  // Bulk freight shed: crates stacked in rows.
+  L = b.at(...W);
+  L.building('대형 화물', -15, -20, 15, 20, { e: [-10, 10], n: [0] }, H);
+  for (const x of [-10, -5, 5, 10]) {
+    stacks(L, x, -17, -3);
+    stacks(L, x, 3, 17);
   }
-  rackX(0, -31, -9.5);
-  rackX(0, 9.5, 21);
-  rack(-38, -5, 5);
-  rackX(-27.5, -9, 9);
-  rackX(-40, -8, 8);
-  rackX(-17, -8, 8);
-  rackX(17, -8, 8);
-  rack(0, 21, 29);
+  L.line(['pallet', 'forkPallet', 'handTruck'], -14, -19, 14, -19, 2.4, 0.4, 0);
 
-  // Tall pallet racking in the east hall.
-  b.zone('팔레트 랙', 20, -25, h, 33);
-  for (const x of [25, 31, 37, 43]) {
-    rack(x, -21, -9, 'pallet');
-    rack(x, 10, 29, 'pallet');
+  // Pallet racking hall.
+  L = b.at(...E);
+  L.building('팔레트 랙', -18, -22, 18, 22, { w: [-12, 12], s: [0] }, H);
+  for (const x of [-12, -6, 6, 12]) {
+    rack(L, x, -19, -3, 'pallet');
+    rack(L, x, 3, 19, 'pallet');
   }
-  rackX(0, 27, 46, 'pallet');
-  rack(24, -5, 5, 'pallet');
+  L.line(['pallet', 'forkPallet', 'handTruck'], 16.6, -20, 16.6, 20, 2, 0.5, 3);
 
-  // Bulk freight in the south-west: crates stacked in rows.
-  b.zone('대형 화물', -48, 8, -33, 31);
-  for (const x of [-45, -41, -37]) {
-    stacks(x, 10, 18.5);
-    stacks(x, 21, 29);
+  // Loading dock: goods in rows inside, trailers backed up outside.
+  L = b.at(...S);
+  L.building('하역장', -25, -12, 25, 12, { n: [-18, -6, 6, 18], e: [0] }, H);
+  for (const z of [-6, 0, 5]) L.line(DOCK, -22, z, 22, z, 1.8, 0.45, 0);
+  rackX(L, 9.5, -23, -8);
+  rackX(L, 9.5, 8, 23);
+  L.line(['cone'], -24, -14, 24, -14, 3, 0.5, 0);
+  for (const x of [-12, 0, 12]) container(L, x, -21, true, 0);
+  L.zone('트럭 주차장', -25, -26, 25, -12);
+
+  // Container stack in the south-west.
+  L = b.at(...SW);
+  L.zone('컨테이너 적치장', -24, -24, 24, 22);
+  for (let x = -16; x <= 18; x += 7) {
+    for (let z = -18; z <= 14; z += 8) {
+      if (L.chance(0.2) || (x < -12 && z > 10)) continue;
+      container(L, x, z, L.chance(0.6), 0.4);
+    }
   }
+  L.scatter(['pallet', 'crate', 'barrel', 'forkPallet', 'tire'], -22, -22, 22, 18, 8);
 
-  // Racks between the hall and the dock, with ways through.
-  for (const [x0, x1] of [[-46, -30], [-26, -10], [10, 26], [30, 46]]) rackX(33, x0, x1, x0 > 0 ? 'pallet' : 'general');
+  // Waste yard behind a fence in the south-east.
+  L = b.at(...SE);
+  L.zone('폐기물 처리장', -22, -22, 18, 18);
+  L.room(-20, -20, 16, 16, { n: [-2], w: [0], s: [6] }, 2.5);
+  for (const z of [-14, -8, -2, 4, 10]) L.line(['dumpster', 'barrel', 'pipes', 'barrel', 'tire'], -16, z, 12, z, 2.6, 0.6, 0);
 
-  // Loading dock along the south wall, between the exits.
-  b.zone('하역장', -h, 34, h, h);
-  for (const x of [-22, -10, 10, 22]) b.wall(x - 1.2, 41, x + 1.2, 49, 2.6);
-  for (const x of [-38, -30, -16, 16, 30, 38]) b.line(DOCK, x, 36.5, x, 40, 1.6, 0.8, 0);
-  b.line(['cone'], -6, 37, 6, 37, 2, 1);
-  for (const x of [-34, -16, 0, 16, 34]) b.line(['forkPallet', 'pallet', 'crate', 'handTruck'], x - 2, 46, x + 2, 46, 1.6, 0.7, 0);
-  b.line(['barrel', 'dumpster', 'pipes', 'barrel'], -44, -h + 1.2, 16, -h + 1.2, 4, 0.5, 0);
+  // Car park in the middle, open around the hunters' spawn.
+  L = b.at(0, 0);
+  L.zone('주차장', -22, -22, 22, 22);
+  for (const [x, z, along] of [[-15, -14, true], [15, 14, true], [14, -15, false], [-14, 15, false]] as const) container(L, x, z, along, 0);
+  for (const z of [-10, 10]) {
+    L.line(['forkPallet', 'pallet', 'crate', 'handTruck'], -21, z, -9, z, 1.8, 0.6, 0);
+    L.line(['forkPallet', 'pallet', 'crate', 'barrier'], 9, z, 21, z, 1.8, 0.6, 0);
+  }
+  L.line(['cone'], -8, -18, 8, -18, 2, 0.8, 0);
+  L.line(['cone'], -8, 18, 8, 18, 2, 0.8, 0);
 }
 
 /**
- * An office floor: two corridors crossing in the middle, closed by fire doors
- * halfway down, and four blocks of rooms. Open offices are split into smaller
- * rooms with high cubicle walls, so no room shows the whole floor.
+ * An office park: office buildings, a canteen, a server building, a records
+ * building and a lounge around a plaza, with a car park in the south. Inside,
+ * high cubicle walls split the open offices so no room shows a whole building.
  */
 function office(b: Builder) {
-  const h = b.half;
-  const c = 3.5;
-  b.zone('복도', -c, -h, c, h);
-  b.zone('복도', -h, -c, h, c);
-  // Fire doors: a wall across each corridor arm with one door in it.
-  b.partitionZ(-25, -c, c, [0]);
-  b.partitionZ(25, -c, c, [0]);
-  b.partitionX(-25, -c, c, [0]);
-  b.partitionX(25, -c, c, [0]);
-  b.line(CORRIDOR, -c + 0.6, -h + 6, -c + 0.6, -10, 6, 0.6, 1);
-  b.line(CORRIDOR, c - 0.6, 10, c - 0.6, h - 6, 6, 0.6, 3);
-  b.line(CORRIDOR, 10, -c + 0.6, h - 6, -c + 0.6, 6, 0.6, 0);
-  b.line(CORRIDOR, -h + 6, c - 0.6, -10, c - 0.6, 6, 0.6, 2);
+  const H = 6;
+  // Main building: a corridor through the middle with rooms on both sides.
+  let L = b.at(...N);
+  L.building('본관', -24, -18, 24, 18, { w: [0], e: [0], s: [-12, 12] }, H);
+  L.partitionZ(-2.5, -24, 24, [-12, 6, 18]);
+  L.partitionZ(2.5, -24, 24, [-12, 12]);
+  L.partitionX(0, -18, -2.5, []);
+  L.partitionX(12, -18, -2.5, []);
+  L.partitionX(0, 2.5, 18, []);
+  L.zone('복도', -24, -2.5, 24, 2.5);
+  L.line(CORRIDOR, -20, -1.9, 20, -1.9, 6, 0.5, 0);
+  L.zone('오픈 오피스', -24, -18, 0, -2.5);
+  for (const z of [-15, -9]) cubicles(L, -22, -2, z);
+  L.zone('회의실', 0, -18, 12, -2.5);
+  L.meetingTable(6, -10, 6);
+  L.prop('whiteboard', 6, -17.4, 0);
+  L.zone('임원실', 12, -18, 24, -2.5);
+  L.desk(18, -12, 0);
+  L.line(['bookshelf', 'cabinet', 'plant', 'bookshelf'], 13, -17.4, 23, -17.4, 1.4, 0.8, 0);
+  L.prop('sofa', 18, -3.9, 2);
+  L.prop('coffeeTable', 18, -5.6);
+  L.zone('오픈 오피스', -24, 2.5, 0, 18);
+  for (const z of [6, 12]) cubicles(L, -22, -2, z);
+  L.zone('오픈 오피스', 0, 2.5, 24, 18);
+  for (const z of [6, 12]) cubicles(L, 2, 22, z);
 
-  /** A cubicle wall (above eye height) along x, with a row of desks backed against it. */
-  const cubicles = (x0: number, x1: number, z: number) => {
-    b.wall(x0, z - 0.08, x1, z + 0.08, 1.8);
-    for (let x = x0 + 1.2; x < x1 - 1; x += 3) {
-      if (b.chance(0.75)) b.desk(x, z + 0.6, 0);
-    }
-  };
+  // Server building: racks in rows, and a room of desks for the IT staff.
+  L = b.at(...NE);
+  L.building('전산동', -15, -13, 15, 13, { w: [0], s: [-8] }, H);
+  L.partitionX(3, -13, 13, [-6, 6]);
+  L.zone('서버실', 3, -13, 15, 13);
+  for (const x of [5.5, 8.5, 11.5]) L.line(SERVER, x, -11, x, 11, 1.1, 0.85, 1);
+  L.zone('전산실', -15, -13, 3, 13);
+  for (const z of [-8, -2, 4]) for (const x of [-12, -7]) L.desk(x, z, 0);
 
-  // North-west: a records room and three open offices.
-  b.room(-h, -h, -c, -c, { e: [-40, -15], s: [-38, -15] });
-  b.partitionX(-27, -h, -c, [-38, -15]);
-  b.partitionZ(-27, -h, -c, [-38, -15]);
-  b.zone('자료실', -h, -h, -27, -27);
-  for (const z of [-46, -41, -36, -31]) b.line(['bookshelf', 'cabinet', 'bookshelf'], -46, z, -31, z, 1.2, 0.8, 0);
-  b.zone('오픈 오피스', -27, -h, -c, -27);
-  for (const z of [-44, -38, -32]) cubicles(-25, -6, z);
-  b.zone('오픈 오피스', -h, -27, -27, -c);
-  for (const z of [-21, -15, -9]) cubicles(-47, -29, z);
-  b.zone('오픈 오피스', -27, -27, -c, -c);
-  for (const z of [-21, -15, -9]) cubicles(-25, -6, z);
+  // Records building: rows of shelves, and a copy room.
+  L = b.at(...NW);
+  L.building('자료동', -16, -14, 16, 14, { e: [0], s: [8] }, H);
+  L.partitionX(4, -14, 14, [-6, 6]);
+  L.zone('자료실', -16, -14, 4, 14);
+  for (const z of [-11, -6, -1, 4, 9]) L.line(['bookshelf', 'cabinet', 'bookshelf'], -14, z, 1.5, z, 1.2, 0.75, 0);
+  L.zone('복사실', 4, -14, 16, 14);
+  L.line(['copier', 'printer', 'copier', 'cabinet'], 5, -13.2, 15, -13.2, 1.6, 0.8, 0);
+  L.line(['archiveBox', 'cabinet', 'trashCan'], 5, 13.3, 15, 13.3, 1.8, 0.6, 2);
+  L.desk(10, -2, 0);
 
-  // North-east: four rooms.
-  b.room(c, -h, h, -c, { w: [-38, -15], s: [15, 38] });
-  b.partitionX(27, -h, -c, [-38, -15]);
-  b.partitionZ(-27, c, h, [15, 38]);
-  b.zone('회의실', c, -h, 27, -27);
-  b.meetingTable(15, -38.5, 12);
-  b.prop('whiteboard', 15, -48.9, 0);
-  b.line(['plant', 'cooler', 'plant'], c + 1, -28.2, 26, -28.2, 6, 0.8, 2);
-  b.zone('서버실', 27, -h, h, -27);
-  for (let x = 30; x <= 47; x += 3) b.line(SERVER, x, -47, x, -31, 1.1, 0.85, 1);
-  b.zone('임원실', c, -27, 27, -c);
-  b.desk(15, -18, 0);
-  b.line(['bookshelf', 'cabinet', 'plant', 'bookshelf'], c + 1, -26.3, 26, -26.3, 1.4, 0.8, 0);
-  b.prop('sofa', 21, -4.6, 2);
-  b.prop('coffeeTable', 21, -6.4);
-  b.prop('floorLamp', 26.2, -4.6);
-  b.zone('복사실', 27, -27, h, -c);
-  b.line(['copier', 'printer', 'copier', 'cabinet'], 28, -26, 49, -26, 1.6, 0.8, 0);
-  b.line(['archiveBox', 'cabinet', 'trashCan'], 28, -4.3, 49, -4.3, 1.8, 0.6, 2);
+  // Canteen.
+  L = b.at(...W);
+  L.building('구내식당', -17, -15, 17, 15, { e: [-6, 6], n: [0] }, H);
+  tables(L, -11, 13, -8, 8, 8);
+  L.line(['desk', 'vending', 'desk', 'cooler'], -16.2, -13, -16.2, 13, 2, 0.8, 1);
 
-  // South-west: lounge, and a cafeteria behind a wall.
-  b.room(-h, c, -c, h, { e: [15, 38], n: [-15, -38] });
-  b.partitionZ(27, -h, -c, [-38, -15]);
-  b.zone('라운지', -h, c, -c, 27);
-  for (const [x, z] of [[-42, 10], [-30, 10], [-18, 10], [-42, 20], [-30, 20], [-18, 20]]) {
-    b.prop('sofa', x, z - 1.4, 0);
-    b.prop('coffeeTable', x, z);
-    b.prop('sofa', x, z + 1.4, 2);
-    if (b.chance(0.5)) b.prop('plant', x + 1.6, z + 1.6);
+  // Second building: open office in the north half, meeting room and pantry in the south.
+  L = b.at(...E);
+  L.building('별관', -18, -20, 18, 20, { w: [-10, 10], s: [9] }, H);
+  L.partitionZ(0, -18, 18, [-10, 10]);
+  L.partitionX(0, 0, 20, [10]);
+  L.zone('오픈 오피스', -18, -20, 18, 0);
+  for (const z of [-16, -10.5, -5]) cubicles(L, -14, 16, z);
+  L.zone('회의실', -18, 0, 0, 20);
+  L.meetingTable(-9, 10, 8);
+  L.prop('whiteboard', -9, 19.4, 2);
+  L.zone('탕비실', 0, 0, 18, 20);
+  L.line(['vending', 'cooler', 'vending', 'trashCan'], 17.2, 2, 17.2, 18, 2.4, 0.8, 3);
+  sofaGroup(L, 7, 6);
+  sofaGroup(L, 7, 14);
+
+  // Car park: rows of barriers between the bays.
+  L = b.at(...S);
+  L.zone('주차장', -24, -24, 24, 24);
+  for (const z of [-14, 0, 14]) L.line(['barrier', 'barrier', 'cone'], -22, z, 22, z, 1.4, 0.7, 0);
+  L.line(['dumpster', 'trashCan', 'dumpster'], -22, 22, 0, 22, 4, 0.7, 2);
+
+  // Lounge.
+  L = b.at(...SW);
+  L.building('라운지', -15, -13, 15, 13, { n: [0], e: [0] }, H);
+  for (const x of [-8, 8]) for (const z of [-6, 5]) sofaGroup(L, x, z);
+  L.line(['vending', 'cooler', 'vending', 'trashCan'], -14.2, -10, -14.2, 10, 2.4, 0.8, 1);
+
+  // Facilities: a storeroom and the guards' room.
+  L = b.at(...SE);
+  L.building('관리동', -14, -12, 14, 12, { n: [-6], w: [0] }, H);
+  L.partitionX(2, -12, 12, [-4, 6]);
+  L.zone('창고방', 2, -12, 14, 12);
+  for (const x of [5, 8.5, 12]) L.line(['smallBox', 'archiveBox', 'cabinet', 'locker'], x, -10, x, 10, 1.1, 0.7, 1);
+  L.zone('경비실', -14, -12, 2, 12);
+  L.desk(-6, -6, 0);
+  L.line(['locker', 'locker', 'cabinet'], -13.4, 0, -13.4, 10, 0.8, 0.9, 1);
+
+  // Plaza in the middle: planters around the edge and tables to sit at.
+  L = b.at(0, 0);
+  L.zone('광장', -22, -22, 22, 22);
+  L.edges(['plant', 'trashCan', 'plant', 'vending'], -20, -20, 20, 20, 0, 3, 0.6);
+  for (const [x, z] of [[-13, -13], [13, -13], [-13, 13], [13, 13]]) {
+    L.prop('coffeeTable', x, z);
+    L.prop('chair', x, z - 0.9, 0);
+    L.prop('chair', x, z + 0.9, 2);
   }
-  b.line(['vending', 'cooler', 'vending', 'trashCan'], -49.2, 6, -49.2, 25, 2.4, 0.8, 1);
-  b.zone('구내식당', -h, 27, -c, h);
-  for (let x = -42; x <= -12; x += 7.5) {
-    for (let z = 32; z <= 44; z += 6) {
-      const t = b.prop('desk', x, z);
-      if (!t) continue;
-      b.prop('chair', x - 0.3, z - 0.8, 0);
-      b.prop('chair', x + 0.3, z + 0.8, 2);
-      if (b.chance(0.3)) b.onTop(t, b.pick(['plant', 'trashCan']));
-    }
-  }
-  b.line(['desk', 'vending', 'desk', 'cooler'], -46, 49.2, -8, 49.2, 2, 0.8, 2);
-
-  // South-east: open offices split in three, and a storage room.
-  b.room(c, c, h, h, { w: [15, 38], n: [15, 38] });
-  b.partitionX(20, c, h, [15, 38]);
-  b.partitionZ(27, 20, 36, [28]);
-  b.zone('오픈 오피스', c, c, 20, h);
-  for (const z of [8, 19, 24, 30, 43]) cubicles(c + 1.5, 18.5, z);
-  b.zone('오픈 오피스', 20, c, h, 27);
-  for (const z of [8, 19, 23.5]) cubicles(22, 48, z);
-  b.zone('창고방', 36, 30, h, h);
-  b.partitionX(36, 27, h, [40]);
-  b.partitionZ(27, 36, h, [43]);
-  for (const x of [39, 43, 47]) b.line(['smallBox', 'archiveBox', 'cabinet', 'locker'], x, 31, x, 47, 1.1, 0.7, 1);
-  b.zone('회의실', 20, 27, 36, h);
-  b.meetingTable(28, 38.5, 8);
-  b.prop('whiteboard', 28, 49, 2);
 }
 
 /**
- * An outdoor yard: shipping containers stand in rows all over it, so lanes
- * between them limit how far you can see. Inside that: a container stack, a
- * workshop shed, a fuel depot, a guard post, a building site and a loading area.
+ * An outdoor yard: container stacks, a workshop shed, a fuel depot, a guard
+ * post, a building site and a loading area, spread out with roads between.
  */
 function yard(b: Builder) {
-  const h = b.half;
-  /** A shipping container, along z if `alongZ`, sometimes stacked two high. */
-  const container = (x: number, z: number, alongZ: boolean, stackChance = 0.3) => {
-    const [w, d] = alongZ ? [2.4, 6] : [6, 2.4];
-    b.wall(x - w / 2, z - d / 2, x + w / 2, z + d / 2, b.chance(stackChance) ? 5.2 : 2.6);
-  };
-
-  b.zone('야적장', -h, -h, h, h);
-  b.zone('컨테이너 구역', -44, -44, -8, -8);
-  for (let x = -40; x <= -12; x += 7) {
-    for (let z = -42; z <= -12; z += 8.5) {
-      if (b.chance(0.15)) continue;
-      container(x, z, b.chance(0.6), 0.4);
+  let L = b.at(...NW);
+  L.zone('컨테이너 구역', -24, -24, 24, 24);
+  for (let x = -17; x <= 18; x += 7) {
+    for (let z = -18; z <= 20; z += 8.5) {
+      if (L.chance(0.15)) continue;
+      container(L, x, z, L.chance(0.6), 0.4);
     }
   }
-  b.scatter(['barrier', 'tire', 'pallet', 'crate', 'barrel'], -44, -44, -8, -8, 14);
+  L.scatter(['barrier', 'tire', 'pallet', 'crate', 'barrel'], -22, -22, 22, 22, 14);
+
+  L = b.at(...N);
+  L.zone('자재 적치장', -22, -22, 22, 22);
+  container(L, 16, -6, true, 0.4);
+  container(L, -16, 8, true, 0.4);
+  for (const z of [-18, -12, -6, 0, 6, 12, 18]) L.line(['spool', 'block', 'pallet', 'pipes', 'sandbag'], -10, z, 10, z, 2, 0.6, 0);
+
+  L = b.at(...NE);
+  L.building('정비 창고', -16, -12, 16, 12, { w: [0], s: [-6, 8] }, 4);
+  L.line(WORKSHOP, -15, -11.2, 15, -11.2, 1.4, 0.6, 0);
+  L.line(['tire', 'spool', 'barrel', 'gasCan'], 15.2, -10, 15.2, 10, 1.5, 0.6, 3);
+  for (const x of [-8, -2, 4]) L.onTop(L.prop('desk', x, -3, 0), L.pick(['toolbox', 'gasCan', 'paintCan']));
+  L.prop('generator', 10, 4);
+  for (const x of [-10, 10]) container(L, x, 20, false, 0.3);
+
+  L = b.at(...W);
+  L.zone('폐타이어장', -22, -22, 22, 22);
+  L.scatter(['tire', 'tire', 'tire', 'barrel'], -20, -20, 20, 20, 30);
+  container(L, -8, -10, false, 0.3);
+  container(L, 10, 6, true, 0.3);
+
+  L = b.at(...E);
+  L.zone('하역장', -24, -24, 24, 24);
+  for (const x of [-16, -8, 0, 8, 16]) {
+    for (const z of [-15, -3, 9]) {
+      if (L.chance(0.2)) continue;
+      container(L, x, z, true, 0.3);
+    }
+  }
+  for (const x of [-12, -4, 4, 12]) L.line(['pallet', 'crate', 'smallBox', 'sack', 'forkPallet'], x, -20, x, 20, 3, 0.5, 1);
+
+  L = b.at(...SW);
+  L.zone('연료 저장소', -22, -22, 18, 18);
+  L.line(['barrier'], -20, -20, 16, -20, 1.4, 0.85, 0);
+  L.line(['barrier'], 16, -20, 16, 16, 1.4, 0.85, 1);
+  for (const z of [-14, -9, -4, 1, 6, 11]) L.line(FUEL, -16, z, 12, z, 1.3, 0.6, 0);
+
+  L = b.at(...S);
+  L.zone('공사 현장', -22, -22, 22, 22);
+  L.line(['sandbag'], -20, -20, 20, -20, 0.9, 0.8, 0);
+  container(L, -14, -12, false, 0.5);
+  container(L, 14, 10, true, 0.3);
+  for (const z of [-4, 1, 6, 11, 16]) L.line(BUILD_SITE, -16, z, 8, z, 1.6, 0.6, 0);
+
+  L = b.at(...SE);
+  L.building('경비실', -6, -5, 6, 5, { w: [0], n: [3] }, 4);
+  L.desk(0, -2, 0);
+  L.prop('cabinet', 5, 4, 3);
+  L.prop('locker', 5.4, 2.5, 3);
+  L.prop('extinguisher', -5, 4.4);
+  for (const x of [-16, -8, 10]) container(L, x, -16, false, 0.4);
+  container(L, -16, 12, true, 0.4);
+  container(L, 14, 2, true, 0.4);
 
   // Containers around the middle, leaving gaps to walk through.
-  for (const [x, z, along] of [[-13, -2, true], [13, 2, true], [2, -13, false], [-2, 13, false], [-11, 11, false], [11, -11, true]] as const) container(x, z, along, 0.2);
-
-  // Workshop shed in the north-east.
-  b.zone('정비 창고', 22, -46, 46, -26);
-  b.room(22, -46, 46, -26, { w: [-36], s: [30, 40] }, 4);
-  b.line(WORKSHOP, 23, -45.2, 45, -45.2, 1.4, 0.6, 0);
-  b.line(['tire', 'spool', 'barrel', 'gasCan'], 45.2, -44, 45.2, -28, 1.5, 0.6, 3);
-  for (const x of [28, 34, 40]) b.onTop(b.prop('desk', x, -38, 0), b.pick(['toolbox', 'gasCan', 'paintCan']));
-  b.prop('generator', 34, -31);
-
-  // Fuel depot in the west, fenced with barriers, tanks in rows.
-  b.zone('연료 저장소', -46, 10, -22, 32);
-  b.line(['barrier'], -46, 10, -22, 10, 1.4, 0.85, 0);
-  b.line(['barrier'], -22, 10, -22, 32, 1.4, 0.85, 1);
-  for (const z of [14, 19, 24, 29]) b.line(FUEL, -43, z, -26, z, 1.3, 0.6, 0);
-
-  // Guard post at the south gate.
-  b.zone('경비실', 12, 38, 22, 46);
-  b.room(12, 38, 22, 46, { w: [42] });
-  b.desk(17, 40, 0);
-  b.prop('cabinet', 21, 45, 3);
-  b.prop('locker', 21.4, 43.5, 3);
-  b.prop('extinguisher', 13, 45.5);
-
-  // Building site south of the middle: site offices, then materials in rows.
-  b.zone('공사 현장', -16, 14, 8, 36);
-  b.line(['sandbag'], -16, 14, 8, 14, 0.9, 0.8, 0);
-  container(-12, 20, false, 0.5);
-  container(4, 30, true, 0.3);
-  for (const z of [25, 29, 33]) b.line(BUILD_SITE, -14, z, -2, z, 1.6, 0.6, 0);
-
-  // Loading area in the east: container rows with pallets in the lanes.
-  b.zone('하역장', 22, -16, 46, 30);
-  for (const x of [27, 35, 43]) {
-    for (const z of [-10, 2, 14, 26]) {
-      if (b.chance(0.2)) continue;
-      container(x, z, true, 0.3);
-    }
+  L = b.at(0, 0);
+  L.zone('중앙 야적장', -22, -22, 22, 22);
+  for (const [x, z, along] of [[-13, -2, true], [13, 2, true], [2, -13, false], [-2, 13, false], [-11, 11, false], [11, -11, true], [-18, -16, false], [18, 16, false]] as const) {
+    container(L, x, z, along, 0.2);
   }
-  for (const x of [31, 39]) b.line(['pallet', 'crate', 'smallBox', 'sack', 'forkPallet'], x, -12, x, 28, 3, 0.5, 1);
-  b.line(['block'], 20, -18, 20, 32, 3, 0.6, 1);
-
-  // Building materials north of the middle.
-  b.zone('자재 적치장', -2, -46, 18, -20);
-  container(14, -30, true, 0.4);
-  for (const z of [-43, -38, -33, -28, -23]) b.line(['spool', 'block', 'pallet', 'pipes', 'sandbag'], 0, z, 9, z, 2, 0.6, 0);
-  // Scrap tires along the west fence.
-  b.zone('폐타이어장', -h, -6, -30, 8);
-  b.scatter(['tire', 'tire', 'tire', 'barrel'], -h + 1, -5, -31, 7, 18);
-  // South-west: a row of containers waiting to ship, and more by the south-east exit.
-  for (const x of [-42, -34, -26]) container(x, 40, false, 0.4);
-  container(30, 40, false, 0.4);
-  container(38, 36, true, 0.4);
-  // Odd containers between the areas, so no lane runs the whole yard.
-  for (const [x, z, along] of [
-    [-24, -2, true], [-24, 8, false], [-8, 42, false], [2, 40, true], [-4, -24, false], [8, -17, true],
-    [17, -6, true], [17, 10, true], [-19, 24, true], [12, 22, true], [14, 31, false], [30, -21, false], [40, -21, false],
-  ] as const) container(x, z, along, 0.3);
-
-  // A little loose clutter, and junk along the outer fence.
-  b.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'wheelbarrow'], -h + 2, -h + 2, h - 2, h - 2, 25);
-  b.edges(['tire', 'pallet', 'barrel', 'block', 'crate', 'dumpster'], -h, -h, h, h, 0.8, 2.4, 0.3);
+  L.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'wheelbarrow'], -22, -22, 22, 22, 10);
 }
 
 const LAYOUTS: Record<Exclude<Theme, 'hideout'>, (b: Builder) => void> = { warehouse, office, yard };
@@ -407,8 +470,21 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   );
   for (const e of exits) b.keepClear(e.min[0] - 1, e.min[2] - 1, e.max[0] + 1, e.max[2] + 1);
   b.keepClear(-CLEAR_ZONE, -CLEAR_ZONE, CLEAR_ZONE, CLEAR_ZONE);
+  const r = ROAD_WIDTH / 2;
+  for (const v of ROADS) {
+    b.road(v - r, -half, v + r, half);
+    b.road(-half, v - r, half, v + r);
+  }
   LAYOUTS[theme](b);
-  const { walls, props, propBoxes, zones } = b;
+  // A few cones and barriers along the road sides.
+  const roadside = theme === 'office' ? ['cone', 'barrier', 'trashCan'] : ['cone', 'barrier', 'cone', 'tire'];
+  for (const v of ROADS) {
+    for (const side of [-r - 0.8, r + 0.8]) {
+      b.line(roadside, v + side, -half + 6, v + side, half - 6, 5, 0.12, 1);
+      b.line(roadside, -half + 6, v + side, half - 6, v + side, 5, 0.12, 0);
+    }
+  }
+  const { walls, props, propBoxes, zones, roads, buildings } = b;
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
   const solids = [...walls, ...propBoxes];
 
@@ -419,9 +495,11 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
   const propSpawns: Vec3[] = [];
   let attempts = 0;
+  // Props start in the named areas, near things to hide as, not out on the roads.
   while (propSpawns.length < 16 && attempts < 4000) {
     attempts++;
-    const pos: Vec3 = [(rand() * 2 - 1) * (half - 2), 0, (rand() * 2 - 1) * (half - 2)];
+    const z = zones[Math.floor(rand() * zones.length)];
+    const pos: Vec3 = [z.min[0] + 1 + rand() * (z.max[0] - z.min[0] - 2), 0, z.min[1] + 1 + rand() * (z.max[1] - z.min[1] - 2)];
     if (Math.abs(pos[0]) < CLEAR_ZONE + 3 && Math.abs(pos[2]) < CLEAR_ZONE + 3) continue;
     if (solids.some((s) => overlaps(boxAt(pos, [1.2, 2, 1.2]), s))) continue;
     propSpawns.push(pos);
@@ -437,16 +515,21 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
   attempts = 0;
   let floorSpots = 0;
-  while (floorSpots < 150 && attempts < 8000) {
+  // Floor spots, mostly inside buildings and named areas where there's cover.
+  while (floorSpots < 260 && attempts < 12000) {
     attempts++;
-    const pos: Vec3 = [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
+    const inArea = rand() < 0.75 && zones.length > 0;
+    const z = zones[Math.floor(rand() * zones.length)];
+    const pos: Vec3 = inArea
+      ? [z.min[0] + rand() * (z.max[0] - z.min[0]), 0, z.min[1] + rand() * (z.max[1] - z.min[1])]
+      : [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
     if (Math.abs(pos[0]) < CLEAR_ZONE && Math.abs(pos[2]) < CLEAR_ZONE) continue;
     if ([...solids, ...keepClear].some((s) => overlaps(boxAt(pos, [0.6, 0.6, 0.6]), s))) continue;
     lootSpots.push(pos);
     floorSpots++;
   }
 
-  return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots, zones };
+  return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots, zones, roads, buildings };
 }
 
 /** The zone a point is in: the smallest one containing it, so rooms win over the area around them. */
@@ -519,6 +602,8 @@ function hideoutMap(seed: number): GameMap {
     exits: [door],
     lootSpots: [],
     zones: [{ name: '은신처', min: [-half, -half], max: [half, half] }],
+    roads: [],
+    buildings: [],
     stations: { stash: [-5.1, 0, -7.4], bench: [5, 0, -7.4], door: [0, 0, half - 1] },
   };
 }

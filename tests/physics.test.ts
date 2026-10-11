@@ -48,11 +48,23 @@ function reachable(map: ReturnType<typeof generateMap>) {
   const step = 0.5;
   const n = Math.ceil((map.half * 2) / step);
   const blockers = [...map.walls, ...map.propBoxes.filter((b) => b.max[1] > 1.2)];
-  const free = (i: number, j: number) => {
-    const x = -map.half + (i + 0.5) * step;
-    const z = -map.half + (j + 0.5) * step;
-    return !blockers.some((b) => overlaps(boxAt([x, 0, z], [0.6, 1.8, 0.6]), b));
-  };
+  // Mark every cell a hunter-sized body would overlap a blocker in, one blocker at a time.
+  const blocked = new Uint8Array(n * n);
+  const r = 0.3;
+  for (const b of blockers) {
+    const i0 = Math.max(0, Math.ceil((b.min[0] - r + map.half) / step - 0.5));
+    const i1 = Math.min(n - 1, Math.floor((b.max[0] + r + map.half) / step - 0.5));
+    const j0 = Math.max(0, Math.ceil((b.min[2] - r + map.half) / step - 0.5));
+    const j1 = Math.min(n - 1, Math.floor((b.max[2] + r + map.half) / step - 0.5));
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        const x = -map.half + (i + 0.5) * step;
+        const z = -map.half + (j + 0.5) * step;
+        if (overlaps(boxAt([x, 0, z], [0.6, 1.8, 0.6]), b)) blocked[i * n + j] = 1;
+      }
+    }
+  }
+  const free = (i: number, j: number) => !blocked[i * n + j];
   const seen = new Uint8Array(n * n);
   const start = Math.floor(n / 2);
   const queue = [[start, start]];

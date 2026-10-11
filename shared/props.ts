@@ -22,7 +22,7 @@ export const PROPS: Record<string, PropDef> = {
   crate: { name: '나무 상자', shape: 'box', size: [1, 1, 1], color: 0x9c6b3c, weight: 5, tier: 1, themes: ['warehouse', 'yard', 'office'] },
   smallBox: { name: '종이 상자', shape: 'box', size: [0.6, 0.45, 0.5], color: 0xc8a26b, weight: 5, tier: 0, themes: ['warehouse', 'office', 'yard'] },
   barrel: { name: '드럼통', shape: 'cylinder', size: [0.8, 1.1, 0.8], color: 0x3d6e8f, weight: 4, tier: 1, themes: ['warehouse', 'yard'] },
-  cone: { name: '라바콘', shape: 'cone', size: [0.45, 0.75, 0.45], color: 0xe8692a, weight: 2, tier: 0, themes: ['warehouse', 'yard'] },
+  cone: { name: '라바콘', shape: 'cone', size: [0.45, 0.75, 0.45], color: 0xe8692a, weight: 2, tier: 0, themes: ['warehouse', 'yard', 'office'] },
   locker: { name: '사물함', shape: 'box', size: [0.7, 1.9, 0.5], color: 0x6b7a80, weight: 2, tier: 2, themes: ['warehouse', 'office', 'yard'] },
   tire: { name: '타이어', shape: 'cylinder', size: [0.85, 0.35, 0.85], color: 0x2a2a2a, weight: 2, tier: 0, themes: ['warehouse', 'yard'] },
   bucket: { name: '양동이', shape: 'cylinder', size: [0.4, 0.45, 0.4], color: 0xb8c4c8, weight: 3, tier: 0, themes: ['warehouse', 'office', 'yard'] },
@@ -47,7 +47,7 @@ export const PROPS: Record<string, PropDef> = {
   bookshelf: { name: '책장', shape: 'box', size: [1, 1.8, 0.35], color: 0x7a5534, weight: 2, tier: 2, themes: ['office', 'warehouse'] },
   gasBottle: { name: '가스통', shape: 'cylinder', size: [0.35, 1.3, 0.35], color: 0x2e8b57, weight: 2, tier: 1, themes: ['yard'] },
   sandbag: { name: '모래주머니', shape: 'box', size: [0.7, 0.3, 0.4], color: 0xa89068, weight: 3, tier: 0, themes: ['yard'] },
-  barrier: { name: '바리케이드', shape: 'box', size: [1.2, 0.8, 0.3], color: 0xf39c12, weight: 2, tier: 1, themes: ['yard'] },
+  barrier: { name: '바리케이드', shape: 'box', size: [1.2, 0.8, 0.3], color: 0xf39c12, weight: 2, tier: 1, themes: ['yard', 'warehouse', 'office'] },
   block: { name: '콘크리트 블록', shape: 'box', size: [0.8, 0.6, 0.4], color: 0x95a5a6, weight: 3, tier: 0, themes: ['yard'] },
   generator: { name: '발전기', shape: 'box', size: [1.2, 0.9, 0.8], color: 0xf1c40f, weight: 1, tier: 2, themes: ['yard', 'warehouse'] },
   vending: { name: '자판기', shape: 'box', size: [0.9, 1.8, 0.8], color: 0xb8322a, weight: 1, tier: 2, themes: ['office', 'warehouse', 'hideout'] },
@@ -60,7 +60,7 @@ export const PROPS: Record<string, PropDef> = {
   coffeeTable: { name: '탁자', shape: 'box', size: [1, 0.45, 0.6], color: 0x6e4b2e, weight: 1, tier: 1, themes: ['office', 'warehouse', 'hideout'] },
   microwave: { name: '전자레인지', shape: 'box', size: [0.5, 0.3, 0.38], color: 0xdadfe1, weight: 1, tier: 0, themes: ['office', 'warehouse', 'yard'] },
   serverRack: { name: '서버랙', shape: 'box', size: [0.6, 2, 1], color: 0x1e2226, weight: 1, tier: 2, themes: ['office'] },
-  dumpster: { name: '쓰레기 컨테이너', shape: 'box', size: [1.8, 1.3, 1], color: 0x2e6b46, weight: 1, tier: 2, themes: ['yard', 'warehouse'] },
+  dumpster: { name: '쓰레기 컨테이너', shape: 'box', size: [1.8, 1.3, 1], color: 0x2e6b46, weight: 1, tier: 2, themes: ['yard', 'warehouse', 'office'] },
 };
 
 export const PROP_TYPES = Object.keys(PROPS);
