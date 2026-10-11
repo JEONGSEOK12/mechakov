@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HUNTER_SIZE } from '../../shared/constants.ts';
-import type { GameMap } from '../../shared/map.ts';
+import type { GameMap, Station } from '../../shared/map.ts';
+import type { Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
 import { PROPS, type Theme } from '../../shared/props.ts';
 
@@ -24,7 +25,8 @@ function crateTexture(): THREE.Texture {
   return tex;
 }
 
-function floorTexture(base: string): THREE.Texture {
+/** One tile per 2 m of floor. */
+function floorTexture(base: string, half: number): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
@@ -39,7 +41,7 @@ function floorTexture(base: string): THREE.Texture {
   g.strokeRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(20, 20);
+  tex.repeat.set(half, half);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -110,7 +112,32 @@ const PALETTES: Record<Theme, Palette> = {
   warehouse: { sky: 0x1d2228, floor: '#5a5d61', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.5 },
   office: { sky: 0x26231f, floor: '#4d5868', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
   yard: { sky: 0x9cc4e4, floor: '#3d3f42', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
+  hideout: { sky: 0x17140f, floor: '#4a4036', wall: 0x6e6253, inner: [0x8a7a62], lamps: true, ambient: 1.6 },
 };
+
+const STATION_LABELS: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발' };
+
+/** A name floating over a hideout station, always facing the camera. */
+function createLabel(text: string): THREE.Sprite {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = 'rgba(10, 12, 16, 0.75)';
+  g.beginPath();
+  g.roundRect(4, 8, 248, 48, 12);
+  g.fill();
+  g.fillStyle = '#ffffff';
+  g.font = 'bold 28px system-ui, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(text, 128, 33);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  sprite.scale.set(2.8, 0.7, 1);
+  return sprite;
+}
 
 /** Builds a map's static scene into `root` (cleared first). */
 export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap): World {
@@ -129,7 +156,8 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   root.add(sun);
   if (pal.lamps) {
     // Ceiling lamps for some local light pools.
-    for (const [x, z] of [[-8, -8], [8, -8], [-8, 8], [8, 8], [0, 0]]) {
+    const r = Math.min(8, map.half - 3);
+    for (const [x, z] of [[-r, -r], [r, -r], [-r, r], [r, r], [0, 0]]) {
       const lamp = new THREE.PointLight(0xffe2b0, 18, 16, 1.6);
       lamp.position.set(x, 5.2, z);
       root.add(lamp);
@@ -139,7 +167,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const colliders: THREE.Object3D[] = [];
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(map.half * 2, map.half * 2),
-    new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor), roughness: 0.95 }),
+    new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor, map.half), roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -170,6 +198,13 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
     propMeshes.push(mesh);
   }
   buildExits(root, map);
+  if (map.stations) {
+    for (const [station, pos] of Object.entries(map.stations) as [Station, Vec3][]) {
+      const label = createLabel(STATION_LABELS[station]);
+      label.position.set(pos[0], 2.6, pos[2] - (station === 'door' ? 0 : 1));
+      root.add(label);
+    }
+  }
   return { colliders, propMeshes };
 }
 

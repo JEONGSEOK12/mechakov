@@ -29,7 +29,12 @@ export interface GameMap {
   exits: Box[];
   /** Places loot can appear: open floor and the tops of low props. */
   lootSpots: Vec3[];
+  /** Hideout only: where to stand to use the stash, the workbench and the raid door. */
+  stations?: Record<Station, Vec3>;
 }
+
+export type Station = 'stash' | 'bench' | 'door';
+export const STATION_RANGE = 1.8;
 
 export function propSize(type: string, rot: 0 | 1 = 0): Vec3 {
   const s = PROPS[type].size;
@@ -50,7 +55,7 @@ function mulberry32(seed: number) {
 const CLEAR_ZONE = 5;
 
 export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
-export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장' };
+export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처' };
 
 const HALF = 20;
 
@@ -122,6 +127,7 @@ function interiorWalls(theme: Theme, rand: () => number, exits: Box[]): Box[] {
  * and theme always give the same map, so the server only sends those two.
  */
 export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
+  if (theme === 'hideout') return hideoutMap(seed);
   const rand = mulberry32(seed);
   const half = HALF;
   const wallHeight = theme === 'yard' ? 4 : 6;
@@ -218,4 +224,62 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
 
   return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots };
+}
+
+/**
+ * The hideout: one fixed room with a row of lockers (the stash), a workbench
+ * for upgrades and a door out to the next raid, drawn like an exit.
+ */
+function hideoutMap(seed: number): GameMap {
+  const half = 9;
+  const wallHeight = 4;
+  const t = 0.5;
+  const walls: Box[] = [
+    { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
+    { min: [-half - t, 0, half], max: [half + t, wallHeight, half + t] },
+    { min: [-half - t, 0, -half], max: [-half, wallHeight, half] },
+    { min: [half, 0, -half], max: [half + t, wallHeight, half] },
+  ];
+  const props: StaticProp[] = [];
+  const propBoxes: Box[] = [];
+  const add = (type: string, pos: Vec3, rot: 0 | 1 = 0) => {
+    props.push({ id: props.length, type, pos, rot });
+    propBoxes.push(boxAt(pos, propSize(type, rot)));
+  };
+  // Stash lockers along the back wall.
+  for (const x of [-6.3, -5.5, -4.7, -3.9]) add('locker', [x, 0, -8.7]);
+  // Workbench: two desks with a filing cabinet and some boxes.
+  add('desk', [4.3, 0, -8.6]);
+  add('desk', [5.75, 0, -8.6]);
+  add('cabinet', [7.2, 0, -8.65]);
+  add('smallBox', [3.9, 0.75, -8.6]);
+  add('bucket', [6.1, 0.75, -8.6]);
+  // Clutter in the corners, clear of the paths.
+  add('crate', [-7.8, 0, 7.6]);
+  add('crate', [-7.8, 1, 7.6]);
+  add('crate', [-6.7, 0, 7.8]);
+  add('pallet', [-7.6, 0, 5.8]);
+  add('barrel', [7.8, 0, 7.8]);
+  add('barrel', [6.9, 0, 7.9]);
+  add('tire', [7.8, 0, 4.5]);
+  add('plant', [-8.3, 0, -2]);
+  add('cooler', [8.4, 0, -4]);
+
+  const door: Box = { min: [-1.5, 0, half - 2], max: [1.5, 0.2, half] };
+  const spawns: Vec3[] = [[0, 0, 0], [1.5, 0, 0.5], [-1.5, 0, 0.5], [0, 0, 1.5], [1.5, 0, 2], [-1.5, 0, 2]];
+  return {
+    seed,
+    theme: 'hideout',
+    half,
+    wallHeight,
+    walls,
+    props,
+    propBoxes,
+    solids: [...walls, ...propBoxes],
+    hunterSpawns: spawns,
+    propSpawns: spawns,
+    exits: [door],
+    lootSpots: [],
+    stations: { stash: [-5.1, 0, -7.4], bench: [5, 0, -7.4], door: [0, 0, half - 1] },
+  };
 }

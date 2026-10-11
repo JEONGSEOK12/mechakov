@@ -115,11 +115,14 @@ export class Room {
   /** Off for solo practice: everyone is a prop and the round is just loot and extract. */
   hunters = true;
   /**
-   * Off for solo: the room waits in the lobby until the person presses start,
-   * and the round ends as soon as every person's raid is decided.
+   * Off for solo: between raids everyone waits in the hideout map until the
+   * person walks out its door, and the round ends as soon as every person's
+   * raid is decided.
    */
   autoStart = true;
   private startRequested = false;
+  /** The raid map most recently played, so the next one rotates. */
+  private lastRaid: Theme = THEMES[Math.floor(Math.random() * THEMES.length)];
 
   constructor(
     readonly name: string,
@@ -255,7 +258,9 @@ export class Room {
    */
   private sendSnapshots() {
     const all = [...this.players.values()];
-    const snaps = new Map(all.map((p) => [p.id, p.snap(this.timings.extract)]));
+    // Bots wait off stage while the person is in their hideout.
+    const shown = this.map.theme === 'hideout' ? all.filter((p) => !p.bot) : all;
+    const snaps = new Map(shown.map((p) => [p.id, p.snap(this.timings.extract)]));
     const roster = all.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
     const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster };
     const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
@@ -264,7 +269,7 @@ export class Room {
         viewer.conn.send(everything);
         continue;
       }
-      const visible = all.filter((p) => p.role !== 'prop' || !p.alive || (this.phase === 'hunt' && this.canSee(viewer, p)));
+      const visible = shown.filter((p) => p.role !== 'prop' || !p.alive || (this.phase === 'hunt' && this.canSee(viewer, p)));
       viewer.conn.send(JSON.stringify({ ...base, players: visible.map((p) => snaps.get(p.id)!) }));
     }
   }
@@ -309,6 +314,8 @@ export class Room {
       case 'lobby':
         if (count >= MIN_PLAYERS && (this.autoStart || this.startRequested)) {
           this.startRequested = false;
+          // Leave the hideout for the next raid map; the countdown runs there.
+          if (this.map.theme === 'hideout') this.changeMap(this.nextRaidTheme());
           this.setPhase('countdown', this.timings.countdown);
         }
         break;
@@ -433,11 +440,20 @@ export class Room {
   }
 
   private goToLobby() {
-    // A different map every round.
-    const next = THEMES[(THEMES.indexOf(this.map.theme) + 1) % THEMES.length];
-    this.map = generateMap(Math.floor(Math.random() * 1e9), next);
-    this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
+    // A different map every round, or back to the hideout between solo raids.
     this.setPhase('lobby', 0);
+    this.changeMap(this.autoStart ? this.nextRaidTheme() : 'hideout');
+  }
+
+  private nextRaidTheme(): Theme {
+    const current = this.map.theme === 'hideout' ? this.lastRaid : this.map.theme;
+    return THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
+  }
+
+  private changeMap(theme: Theme) {
+    if (this.map.theme !== 'hideout') this.lastRaid = this.map.theme;
+    this.map = generateMap(Math.floor(Math.random() * 1e9), theme);
+    this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
     for (const p of this.players.values()) this.resetForLobby(p);
   }
 

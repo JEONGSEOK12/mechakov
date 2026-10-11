@@ -3,42 +3,31 @@ import { canAfford, level, nextCost, UPGRADES, UPGRADE_IDS, type Profile } from 
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/**
- * The between-raids screen: what's in the stash and what it can buy. In solo it
- * is also the lobby, held open between raids with a button to start the next.
- */
+/** What a panel shows: everything (H), or one hideout station's part of it. */
+export type HideoutView = 'all' | 'stash' | 'bench';
+
+const TITLES: Record<HideoutView, string> = { all: '은신처', stash: '보관함', bench: '작업대' };
+
+/** The between-raids screen: what's in the stash and what it can buy. */
 export class Hideout {
   open = false;
-  /** Shown as the lobby: can't be closed, only left by starting a raid. */
-  lobby = false;
   onUpgrade: (id: string) => void = () => {};
-  onStart: () => void = () => {};
 
   constructor() {
     $('hideout-close').addEventListener('click', () => this.toggle(false));
-    $('raid-start').addEventListener('click', () => this.onStart());
     $('upgrades').addEventListener('click', (e) => {
       const id = (e.target as HTMLElement).dataset.upgrade;
       if (id) this.onUpgrade(id);
     });
   }
 
-  toggle(open = !this.open) {
-    if (this.lobby) open = true;
+  toggle(open = !this.open, view: HideoutView = 'all') {
     this.open = open;
+    $('hideout-title').textContent = TITLES[view];
+    $('stash-section').classList.toggle('hidden', view === 'bench');
+    $('upgrade-section').classList.toggle('hidden', view === 'stash');
     $('hideout').classList.toggle('hidden', !open);
     if (open) document.exitPointerLock();
-  }
-
-  /** Switch between the lobby and the plain hideout panel. */
-  setLobby(lobby: boolean, lastRaid = '') {
-    if (lobby === this.lobby) return;
-    this.lobby = lobby;
-    $('hideout-title').textContent = lobby ? '대기실' : '은신처';
-    $('hideout-close').classList.toggle('hidden', lobby);
-    $('lobby-bar').classList.toggle('hidden', !lobby);
-    $('last-raid').textContent = lastRaid;
-    this.toggle(lobby);
   }
 
   render(profile: Profile, canUpgradeNow: boolean) {
