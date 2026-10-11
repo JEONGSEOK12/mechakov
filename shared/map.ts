@@ -444,6 +444,18 @@ function yard(b: Builder) {
 
 const LAYOUTS: Record<Exclude<Theme, 'hideout'>, (b: Builder) => void> = { warehouse, office, yard };
 
+/** Invisible walls above the outer walls, so a rocket jump can't fly out of the map. */
+const skyFence = (half: number, y0: number): Box[] => {
+  const t = 0.5;
+  const y1 = 200;
+  return [
+    { min: [-half - t, y0, -half - t], max: [half + t, y1, -half] },
+    { min: [-half - t, y0, half], max: [half + t, y1, half + t] },
+    { min: [-half - t, y0, -half], max: [-half, y1, half] },
+    { min: [half, y0, -half], max: [half + t, y1, half] },
+  ];
+};
+
 /**
  * A map for one of the themes: outer walls, the theme's areas with props that
  * fit each area, exits in three corners and an open middle where hunters
@@ -486,7 +498,7 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
   const { walls, props, propBoxes, zones, roads, buildings } = b;
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
-  const solids = [...walls, ...propBoxes];
+  const solids = [...walls, ...propBoxes, ...skyFence(half, wallHeight)];
 
   const hunterSpawns: Vec3[] = [];
   for (let i = 0; i < 8; i++) {
@@ -596,7 +608,7 @@ function hideoutMap(seed: number): GameMap {
     walls,
     props,
     propBoxes,
-    solids: [...walls, ...propBoxes],
+    solids: [...walls, ...propBoxes, ...skyFence(half, wallHeight)],
     hunterSpawns: spawns,
     propSpawns: spawns,
     exits: [door],

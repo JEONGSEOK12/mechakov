@@ -57,7 +57,7 @@ export const ROCKET_DELAY = 0.15;
 /** Most damage (to hunters only), at the centre of the blast. */
 export const ROCKET_DAMAGE = 18;
 /** Knockback speed at the centre of the blast, in m/s. */
-export const ROCKET_KNOCKBACK = 12;
+export const ROCKET_KNOCKBACK = 18;
 /** Per-second fade of knockback speed. */
 export const KNOCKBACK_GROUND_DRAG = 9;
 export const KNOCKBACK_AIR_DRAG = 0.4;
