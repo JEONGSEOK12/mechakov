@@ -68,9 +68,10 @@ test('a killed prop loses its bag to the hunter, who keeps it by surviving', () 
   }
   assert.equal(prop.alive, false);
   assert.deepEqual(prop.bag, []);
-  assert.deepEqual(hunter.bag, [item.type]);
+  assert.equal(hunter.bag[0], item.type, "the prop's item");
+  assert.ok(['scrap', 'bolts', 'wires'].includes(hunter.bag[1]), 'plus a bounty');
   runUntil(() => room.phase === 'end');
-  assert.equal(hunter.profile.stash[item.type], 1);
+  assert.ok(hunter.profile.stash[item.type] >= 1);
   assert.equal(prop.profile.stash[item.type], undefined);
 });
 
@@ -124,4 +125,19 @@ test('profiles survive a restart', () => {
   const again = new ProfileStore(file).get(token, 'kim');
   assert.equal(again.token, token);
   assert.equal(again.profile.stash.gpu, 2);
+});
+
+test('bots play props: they hide as a prop, and the person is the hunter', () => {
+  const room = new Room('bots', 7, timings);
+  const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const bots = [room.addBot()!, room.addBot()!, room.addBot()!];
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  assert.equal(room.phase, 'hide');
+  assert.equal(human.role, 'hunter');
+  assert.ok(bots.every((b) => b.role === 'prop'));
+  // Give them a long hiding phase to walk over and disguise.
+  room.phaseEnds = room.time + 20;
+  for (let i = 0; i < 15 / TICK_DT; i++) room.tick();
+  const disguised = bots.filter((b) => b.prop !== 'smallBox');
+  assert.ok(disguised.length >= 2, `${disguised.length} of 3 bots disguised`);
 });

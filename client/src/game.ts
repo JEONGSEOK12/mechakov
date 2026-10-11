@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
-import { generateMap, type GameMap } from '../../shared/map.ts';
+import { generateMap, THEME_NAMES, type GameMap } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
 import { ITEMS } from '../../shared/items.ts';
-import { PROPS } from '../../shared/props.ts';
+import { PROPS, type Theme } from '../../shared/props.ts';
 import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg } from '../../shared/protocol.ts';
 import { canDisguiseAs, type Profile } from '../../shared/upgrades.ts';
 import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
 import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
-import { buildExits, buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
+import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Net } from './net.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
@@ -91,10 +91,12 @@ export class Game {
   private result: { outcome: Outcome; items: string[] } | null = null;
   private lastHideoutRender = 0;
 
-  constructor(private net: Net, private myId: number, seed: number, private profile: Profile) {
-    this.map = generateMap(seed);
-    this.world = buildWorld(this.scene, this.map);
-    buildExits(this.scene, this.map);
+  private worldRoot = new THREE.Group();
+
+  constructor(private net: Net, private myId: number, seed: number, theme: Theme, private profile: Profile) {
+    this.scene.add(this.worldRoot);
+    this.map = generateMap(seed, theme);
+    this.world = buildWorld(this.scene, this.worldRoot, this.map);
     this.highlight.visible = false;
     this.scene.add(this.highlight);
 
@@ -126,6 +128,9 @@ export class Game {
       this.renderHideout();
     };
     this.hideout.onUpgrade = (id) => this.net.send({ t: 'upgrade', id });
+    this.controls.onAddBot = () => {
+      if (this.phase === 'lobby' || this.phase === 'countdown') this.net.send({ t: 'addBot' });
+    };
 
     net.onMessage = (msg) => this.onMessage(msg);
     net.onClose = () => this.hud.center('서버와 연결이 끊겼어요. 새로고침해 주세요.');
@@ -167,6 +172,11 @@ export class Game {
       }
       case 'roundEnd':
         this.winner = msg.winner;
+        break;
+      case 'map':
+        this.map = generateMap(msg.seed, msg.theme);
+        this.world = buildWorld(this.scene, this.worldRoot, this.map);
+        this.faceLocked = false;
         break;
       case 'profile':
         this.profile = msg.profile;
@@ -422,7 +432,7 @@ export class Game {
 
   private updateHud(me: PlayerSnap | undefined) {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
-    this.hud.phase(this.phase, left);
+    this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme]);
     this.hud.me(me, this.phase);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
     this.hud.scoreboard(this.scoreboardOpen, [...this.latest.values()], this.myId);
@@ -447,6 +457,7 @@ export class Game {
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
     if (this.disguiseLocked !== null) hints.push(`${PROPS[this.map.props[this.disguiseLocked].type].name}: 변신 도감 업그레이드 필요`);
+    if (this.phase === 'lobby' || this.phase === 'countdown') hints.push('B: 프롭 봇 추가');
     let hint = hints.join(' · ');
     if (me?.role === 'prop' && me.alive && this.faceLocked) hint += `${hint ? ' · ' : ''}방향 고정됨 (R)`;
     if (!this.controls.locked && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';

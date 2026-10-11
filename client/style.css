@@ -13,6 +13,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
   background: #1c1f24; color: #eee; }
 #join button { background: #e8692a; border: none; font-weight: 700; cursor: pointer; }
 #join-error { color: #ff7a7a; min-height: 1em; }
+#online { color: #8a9099; font-size: 13px; }
 
 #hud { position: fixed; inset: 0; pointer-events: none; user-select: none; }
 #phase { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 16px;

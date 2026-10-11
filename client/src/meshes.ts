@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { HUNTER_SIZE } from '../../shared/constants.ts';
 import type { GameMap } from '../../shared/map.ts';
 import { ITEMS } from '../../shared/items.ts';
-import { PROPS } from '../../shared/props.ts';
+import { PROPS, type Theme } from '../../shared/props.ts';
 
 function crateTexture(): THREE.Texture {
   const c = document.createElement('canvas');
@@ -24,17 +24,17 @@ function crateTexture(): THREE.Texture {
   return tex;
 }
 
-function floorTexture(): THREE.Texture {
+function floorTexture(base: string): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#5a5d61';
+  g.fillStyle = base;
   g.fillRect(0, 0, 128, 128);
   for (let i = 0; i < 400; i++) {
     g.fillStyle = `rgba(0,0,0,${Math.random() * 0.08})`;
     g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
   }
-  g.strokeStyle = '#4a4d51';
+  g.strokeStyle = 'rgba(0,0,0,0.18)';
   g.lineWidth = 2;
   g.strokeRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
@@ -96,46 +96,68 @@ export interface World {
   propMeshes: THREE.Object3D[];
 }
 
-export function buildWorld(scene: THREE.Scene, map: GameMap): World {
-  scene.background = new THREE.Color(0x1d2228);
-  scene.fog = new THREE.Fog(0x1d2228, 25, 60);
+interface Palette {
+  sky: number;
+  floor: string;
+  wall: number;
+  /** Shelves, partitions, containers: walls lower than the outer ones. */
+  inner: number[];
+  lamps: boolean;
+  ambient: number;
+}
 
-  scene.add(new THREE.HemisphereLight(0xbcd3ff, 0x5a5040, 1.5));
-  const sun = new THREE.DirectionalLight(0xfff1dc, 1.6);
+const PALETTES: Record<Theme, Palette> = {
+  warehouse: { sky: 0x1d2228, floor: '#5a5d61', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.5 },
+  office: { sky: 0x26231f, floor: '#4d5868', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
+  yard: { sky: 0x9cc4e4, floor: '#3d3f42', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
+};
+
+/** Builds a map's static scene into `root` (cleared first). */
+export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap): World {
+  root.clear();
+  const pal = PALETTES[map.theme];
+  scene.background = new THREE.Color(pal.sky);
+  scene.fog = new THREE.Fog(pal.sky, map.theme === 'yard' ? 40 : 25, map.theme === 'yard' ? 100 : 60);
+
+  root.add(new THREE.HemisphereLight(0xbcd3ff, 0x5a5040, pal.ambient));
+  const sun = new THREE.DirectionalLight(0xfff1dc, map.theme === 'yard' ? 2.4 : 1.6);
   sun.position.set(12, 30, 8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const s = map.half + 2;
   Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 80 });
-  scene.add(sun);
-  // Ceiling lamps for some local light pools.
-  for (const [x, z] of [[-8, -8], [8, -8], [-8, 8], [8, 8], [0, 0]]) {
-    const lamp = new THREE.PointLight(0xffe2b0, 18, 16, 1.6);
-    lamp.position.set(x, 5.2, z);
-    scene.add(lamp);
+  root.add(sun);
+  if (pal.lamps) {
+    // Ceiling lamps for some local light pools.
+    for (const [x, z] of [[-8, -8], [8, -8], [-8, 8], [8, 8], [0, 0]]) {
+      const lamp = new THREE.PointLight(0xffe2b0, 18, 16, 1.6);
+      lamp.position.set(x, 5.2, z);
+      root.add(lamp);
+    }
   }
 
   const colliders: THREE.Object3D[] = [];
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(map.half * 2, map.half * 2),
-    new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.95 }),
+    new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor), roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
-  scene.add(floor);
+  root.add(floor);
   colliders.push(floor);
 
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a8f94, roughness: 0.9 });
-  const shelfMat = new THREE.MeshStandardMaterial({ color: 0x6a8aa0, roughness: 0.7, metalness: 0.2 });
-  for (const w of map.walls) {
+  const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, roughness: 0.9 });
+  const innerMats = pal.inner.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 }));
+  map.walls.forEach((w, i) => {
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), size[1] < map.wallHeight ? shelfMat : wallMat);
+    const mat = size[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
     mesh.position.set((w.min[0] + w.max[0]) / 2, (w.min[1] + w.max[1]) / 2, (w.min[2] + w.max[2]) / 2);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    scene.add(mesh);
+    root.add(mesh);
     colliders.push(mesh);
-  }
+  });
 
   const propMeshes: THREE.Object3D[] = [];
   for (const p of map.props) {
@@ -143,10 +165,11 @@ export function buildWorld(scene: THREE.Scene, map: GameMap): World {
     mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
     mesh.rotation.y = (p.rot * Math.PI) / 2;
     mesh.userData.propId = p.id;
-    scene.add(mesh);
+    root.add(mesh);
     colliders.push(mesh);
     propMeshes.push(mesh);
   }
+  buildExits(root, map);
   return { colliders, propMeshes };
 }
 
@@ -170,7 +193,7 @@ export function createLootMesh(type: string): THREE.Object3D {
   return g;
 }
 
-export function buildExits(scene: THREE.Scene, map: GameMap): THREE.Object3D[] {
+function buildExits(root: THREE.Group, map: GameMap): THREE.Object3D[] {
   return map.exits.map((e) => {
     const w = e.max[0] - e.min[0];
     const d = e.max[2] - e.min[2];
@@ -189,7 +212,7 @@ export function buildExits(scene: THREE.Scene, map: GameMap): THREE.Object3D[] {
     light.position.y = 2;
     g.add(pad, beam, light);
     g.position.set((e.min[0] + e.max[0]) / 2, 0, (e.min[2] + e.max[2]) / 2);
-    scene.add(g);
+    root.add(g);
     return g;
   });
 }

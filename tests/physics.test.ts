@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TICK_DT } from '../shared/constants.ts';
-import { generateMap } from '../shared/map.ts';
+import { generateMap, THEMES } from '../shared/map.ts';
+import { boxAt, overlaps } from '../shared/geometry.ts';
+import { PROPS } from '../shared/props.ts';
 import { stepBody, type BodyState } from '../shared/physics.ts';
 import type { Box, InputKeys } from '../shared/types.ts';
 
@@ -40,3 +42,22 @@ test('frozen hunters cannot move or jump', () => {
   for (let i = 0; i < 30; i++) stepBody(b, 'hunter', null, { ...forward, jump: true }, 0, true, TICK_DT, []);
   assert.deepEqual(b.pos, [0, 0, 0]);
 });
+
+for (const theme of THEMES) {
+  test(`${theme} maps are playable`, () => {
+    for (const seed of [1, 2, 3, 99, 12345]) {
+      const map = generateMap(seed, theme);
+      assert.ok(map.props.length > 60, `${theme}/${seed}: ${map.props.length} props`);
+      assert.ok(map.props.every((p) => PROPS[p.type].themes.includes(theme)));
+      assert.ok(map.propSpawns.length >= 12, `${theme}/${seed}: ${map.propSpawns.length} spawns`);
+      assert.ok(map.lootSpots.length >= 30);
+      for (const e of map.exits) {
+        const zone = { min: e.min, max: [e.max[0], 2, e.max[2]] as [number, number, number] };
+        assert.ok(!map.solids.some((s) => overlaps(zone, s)), `${theme}/${seed}: exit blocked`);
+      }
+      for (const s of map.hunterSpawns) {
+        assert.ok(!map.solids.some((b) => overlaps(boxAt(s, [0.6, 1.8, 0.6]), b)));
+      }
+    }
+  });
+}

@@ -3,6 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 import { DEFAULT_TIMINGS, type Timings } from '../../shared/constants.ts';
+import { THEMES } from '../../shared/map.ts';
 import type { ClientMsg } from '../../shared/protocol.ts';
 import { ProfileStore } from './profiles.ts';
 import { Room, type Player } from './room.ts';
@@ -57,14 +58,29 @@ export function startServer(opts: ServerOptions) {
       res.end(JSON.stringify({ ok: true, rooms: rooms.size }));
       return;
     }
+    if (req.url === '/rooms') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      const list = [...rooms.values()].map((r) => ({ name: r.name, players: r.humans.length, phase: r.phase }));
+      res.end(JSON.stringify({ online: list.reduce((n, r) => n + r.players, 0), rooms: list }));
+      return;
+    }
     if (staticDir) serveStatic(staticDir, req, res);
     else res.writeHead(200).end('mechakov server. Run the client with `npm run dev`.');
   });
 
+  /** Quick play: the busiest open quick room still between rounds, then any open one, else a new one. */
+  let quickCount = 0;
+  const quickMatch = () => {
+    const open = [...rooms.values()].filter((r) => r.name.startsWith('quick-') && !r.full);
+    const waiting = (r: Room) => r.phase === 'lobby' || r.phase === 'countdown';
+    open.sort((a, b) => Number(waiting(b)) - Number(waiting(a)) || b.humans.length - a.humans.length);
+    return open[0]?.name ?? `quick-${++quickCount}`;
+  };
+
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '/ws', 'http://localhost');
-    const roomName = (url.searchParams.get('room') ?? 'main').slice(0, 32) || 'main';
+    const requested = (url.searchParams.get('room') ?? '').trim().slice(0, 32);
     let player: Player | null = null;
     let room: Room | null = null;
 
@@ -77,12 +93,15 @@ export function startServer(opts: ServerOptions) {
       }
       if (!player) {
         if (msg.t !== 'join') return;
+        const roomName = requested || quickMatch();
         room = rooms.get(roomName) ?? null;
         if (!room) {
-          room = new Room(roomName, opts.seed ?? Math.floor(Math.random() * 1e9), opts.timings ?? DEFAULT_TIMINGS, store);
+          const theme = opts.seed === undefined ? THEMES[Math.floor(Math.random() * THEMES.length)] : 'warehouse';
+          room = new Room(roomName, opts.seed ?? Math.floor(Math.random() * 1e9), opts.timings ?? DEFAULT_TIMINGS, store, theme);
           rooms.set(roomName, room);
           room.start();
         }
+        if (room.full) room.removeBot();
         if (room.full) {
           ws.send(JSON.stringify({ t: 'error', message: '방이 가득 찼어요.' }));
           ws.close();
@@ -105,7 +124,7 @@ export function startServer(opts: ServerOptions) {
       if (!room || !player) return;
       online.delete(player.token);
       room.removePlayer(player.id);
-      if (room.players.size === 0) {
+      if (room.humans.length === 0) {
         room.stop();
         rooms.delete(room.name);
       }

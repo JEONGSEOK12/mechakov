@@ -1,4 +1,4 @@
-import { PROPS, PROP_TYPES } from './props.ts';
+import { PROPS, PROP_TYPES, type Theme } from './props.ts';
 import { boxAt, overlaps } from './geometry.ts';
 import type { Box, Vec3 } from './types.ts';
 
@@ -13,6 +13,7 @@ export interface StaticProp {
 
 export interface GameMap {
   seed: number;
+  theme: Theme;
   half: number;
   wallHeight: number;
   /** Walls and shelving: everything that is not a prop. */
@@ -48,54 +49,104 @@ function mulberry32(seed: number) {
 
 const CLEAR_ZONE = 5;
 
-/**
- * A warehouse: outer walls, rows of shelving, a small office in one corner and
- * an open area in the middle where hunters spawn. The same seed always gives the
- * same map, so the server only has to send the seed.
- */
-export function generateMap(seed: number): GameMap {
-  const rand = mulberry32(seed);
-  const half = 20;
-  const wallHeight = 6;
-  const t = 0.5;
-  const walls: Box[] = [
-    { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
-    { min: [-half - t, 0, half], max: [half + t, wallHeight, half + t] },
-    { min: [-half - t, 0, -half], max: [-half, wallHeight, half] },
-    { min: [half, 0, -half], max: [half + t, wallHeight, half] },
-  ];
+export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
+export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장' };
 
-  // Shelving rows on both sides of the middle aisle.
-  for (const x of [-15, -10, 10, 15]) {
-    for (const [z0, z1] of [[-17, -7], [7, 17]]) {
-      walls.push({ min: [x - 0.6, 0, z0], max: [x + 0.6, 3.2, z1] });
+const HALF = 20;
+
+/** Interior walls for each theme. They must leave the middle and the exit corners open. */
+function interiorWalls(theme: Theme, rand: () => number, exits: Box[]): Box[] {
+  const walls: Box[] = [];
+  if (theme === 'warehouse') {
+    // Shelving rows on both sides of the middle aisle.
+    for (const x of [-15, -10, 10, 15]) {
+      for (const [z0, z1] of [[-17, -7], [7, 17]]) walls.push({ min: [x - 0.6, 0, z0], max: [x + 0.6, 3.2, z1] });
+    }
+    // A small office in the far corner, with a doorway facing the middle.
+    walls.push({ min: [11, 0, -HALF], max: [11.3, 3, -13.5] });
+    walls.push({ min: [11, 0, -10.5], max: [HALF, 3, -10.2] });
+    // Low dividers along the middle aisle.
+    walls.push({ min: [-6, 0, -12], max: [-5.7, 1.2, -8] });
+    walls.push({ min: [5.7, 0, 8], max: [6, 1.2, 12] });
+  } else if (theme === 'office') {
+    // Four corner rooms around a cross-shaped hall, each with two doorways.
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const x = sx * 8;
+        const z = sz * 8;
+        const span = (a: number, b: number) => [Math.min(a, b), Math.max(a, b)];
+        // Wall along x = ±8 with a door around z = ±14.
+        for (const [z0, z1] of [span(z, sz * 13), span(sz * 15, sz * HALF)]) {
+          walls.push({ min: [x - 0.15, 0, z0], max: [x + 0.15, 3, z1] });
+        }
+        // Wall along z = ±8 with a door around x = ±14.
+        for (const [x0, x1] of [span(x, sx * 13), span(sx * 15, sx * HALF)]) {
+          walls.push({ min: [x0, 0, z - 0.15], max: [x1, 3, z + 0.15] });
+        }
+      }
+    }
+    // Cubicle partitions in the arms of the hall.
+    for (const s of [-1, 1]) {
+      for (const off of [-4, 4]) {
+        walls.push({ min: [off - 0.1, 0, Math.min(s * 10, s * 18)], max: [off + 0.1, 1.4, Math.max(s * 10, s * 18)] });
+        walls.push({ min: [Math.min(s * 10, s * 18), 0, off - 0.1], max: [Math.max(s * 10, s * 18), 1.4, off + 0.1] });
+      }
+    }
+  } else {
+    // Shipping containers dropped around the yard.
+    const keepClear = exits.map((e): Box => ({ min: [e.min[0] - 1, 0, e.min[2] - 1], max: [e.max[0] + 1, 3, e.max[2] + 1] }));
+    let attempts = 0;
+    while (walls.length < 9 && attempts < 500) {
+      attempts++;
+      const rot = rand() < 0.5;
+      const [w, d] = rot ? [6, 2.4] : [2.4, 6];
+      const x = (rand() * 2 - 1) * (HALF - 4);
+      const z = (rand() * 2 - 1) * (HALF - 4);
+      const box: Box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, 2.6, z + d / 2] };
+      const padded: Box = { min: [box.min[0] - 1.5, 0, box.min[2] - 1.5], max: [box.max[0] + 1.5, 3, box.max[2] + 1.5] };
+      const middle: Box = { min: [-CLEAR_ZONE - 1, 0, -CLEAR_ZONE - 1], max: [CLEAR_ZONE + 1, 3, CLEAR_ZONE + 1] };
+      if ([middle, ...keepClear, ...walls].some((o) => overlaps(padded, o))) continue;
+      walls.push(box);
     }
   }
-  // Office in the far corner, with a doorway facing the middle.
-  const o0 = 11;
-  walls.push({ min: [o0, 0, -half], max: [o0 + 0.3, 3, -o0 - 2.5] });
-  walls.push({ min: [o0, 0, -o0 + 0.5], max: [half, 3, -o0 + 0.8] });
-  // Low dividers along the middle aisle.
-  walls.push({ min: [-6, 0, -12], max: [-5.7, 1.2, -8] });
-  walls.push({ min: [5.7, 0, 8], max: [6, 1.2, 12] });
+  return walls;
+}
 
+/**
+ * A map for one of the themes: outer walls, theme-specific interior, props,
+ * exits in three corners and an open middle where hunters spawn. The same seed
+ * and theme always give the same map, so the server only sends those two.
+ */
+export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
+  const rand = mulberry32(seed);
+  const half = HALF;
+  const wallHeight = theme === 'yard' ? 4 : 6;
+  const t = 0.5;
   const exits: Box[] = [
     { min: [-half, 0, -half], max: [-half + 3, 0.2, -half + 3] },
     { min: [half - 3, 0, half - 3], max: [half, 0.2, half] },
     { min: [-half, 0, half - 3], max: [-half + 3, 0.2, half] },
   ];
+  const walls: Box[] = [
+    { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
+    { min: [-half - t, 0, half], max: [half + t, wallHeight, half + t] },
+    { min: [-half - t, 0, -half], max: [-half, wallHeight, half] },
+    { min: [half, 0, -half], max: [half + t, wallHeight, half] },
+    ...interiorWalls(theme, rand, exits),
+  ];
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
 
   const props: StaticProp[] = [];
   const propBoxes: Box[] = [];
-  const totalWeight = PROP_TYPES.reduce((s, k) => s + PROPS[k].weight, 0);
+  const types = PROP_TYPES.filter((k) => PROPS[k].themes.includes(theme));
+  const totalWeight = types.reduce((s, k) => s + PROPS[k].weight, 0);
   const pickType = () => {
     let r = rand() * totalWeight;
-    for (const k of PROP_TYPES) {
+    for (const k of types) {
       r -= PROPS[k].weight;
       if (r <= 0) return k;
     }
-    return PROP_TYPES[0];
+    return types[0];
   };
   const blocked = (b: Box) => {
     const padded: Box = {
@@ -119,9 +170,9 @@ export function generateMap(seed: number): GameMap {
     const box = boxAt(pos, propSize(type, rot));
     if (blocked(box)) continue;
     add(type, pos, rot);
-    // Stack something on top of some crates.
-    if (type === 'crate' && rand() < 0.35) {
-      const top = rand() < 0.5 ? 'crate' : 'smallBox';
+    // Stack something on top of some crates and desks.
+    if ((type === 'crate' || type === 'desk') && rand() < 0.35) {
+      const top = type === 'desk' ? 'smallBox' : rand() < 0.5 ? 'crate' : 'smallBox';
       add(top, [pos[0], box.max[1], pos[2]], (rand() < 0.5 ? 0 : 1) as 0 | 1);
     }
   }
@@ -162,5 +213,5 @@ export function generateMap(seed: number): GameMap {
     floorSpots++;
   }
 
-  return { seed, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots };
+  return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots };
 }

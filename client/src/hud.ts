@@ -22,8 +22,8 @@ export class Hud {
     $('hud').classList.remove('hidden');
   }
 
-  phase(phase: Phase, timeLeft: number) {
-    $('phase-label').textContent = PHASE_LABEL[phase];
+  phase(phase: Phase, timeLeft: number, mapName: string) {
+    $('phase-label').textContent = `${mapName} · ${PHASE_LABEL[phase]}`;
     $('phase-timer').textContent = phase === 'lobby' ? '' : clock(timeLeft);
   }
 
