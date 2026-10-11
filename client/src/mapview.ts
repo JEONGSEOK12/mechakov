@@ -1,4 +1,4 @@
-import { THEME_NAMES, type GameMap, type Station } from '../../shared/map.ts';
+import { THEME_NAMES, type GameMap, type Station, type Zone } from '../../shared/map.ts';
 
 const SIZE = 900;
 const STATION_NAMES: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발' };
@@ -56,12 +56,40 @@ export class MapView {
       g.fillRect(X(z.min[0]), Z(z.min[1]), (z.max[0] - z.min[0]) * s, (z.max[1] - z.min[1]) * s);
     });
 
+    // Roads, with a dashed middle line, and building floors.
+    for (const r of map.roads) {
+      g.fillStyle = '#121418';
+      g.fillRect(X(r.min[0]), Z(r.min[1]), (r.max[0] - r.min[0]) * s, (r.max[1] - r.min[1]) * s);
+    }
+    g.strokeStyle = 'rgba(232, 211, 106, 0.6)';
+    g.lineWidth = 1;
+    g.setLineDash([6, 6]);
+    for (const r of map.roads) {
+      g.beginPath();
+      if (r.max[0] - r.min[0] > r.max[1] - r.min[1]) {
+        const z = Z((r.min[1] + r.max[1]) / 2);
+        g.moveTo(X(r.min[0]), z);
+        g.lineTo(X(r.max[0]), z);
+      } else {
+        const x = X((r.min[0] + r.max[0]) / 2);
+        g.moveTo(x, Z(r.min[1]));
+        g.lineTo(x, Z(r.max[1]));
+      }
+      g.stroke();
+    }
+    g.setLineDash([]);
+    for (const bld of map.buildings) {
+      g.fillStyle = '#2d333b';
+      g.fillRect(X(bld.min[0]), Z(bld.min[1]), (bld.max[0] - bld.min[0]) * s, (bld.max[1] - bld.min[1]) * s);
+    }
+
     for (const b of map.propBoxes) {
       if (b.min[1] > 0.01) continue;
       g.fillStyle = b.max[1] > 1.5 ? '#6f6656' : '#4c5058';
       g.fillRect(X(b.min[0]), Z(b.min[2]), Math.max(1.5, (b.max[0] - b.min[0]) * s), Math.max(1.5, (b.max[2] - b.min[2]) * s));
     }
     for (const w of map.walls) {
+      if (w.min[1] > 0) continue;
       const outer = w.max[1] >= map.wallHeight;
       g.fillStyle = outer ? '#c9ced4' : w.max[1] > 1.5 ? '#9aa3ad' : '#6a737d';
       g.fillRect(X(w.min[0]), Z(w.min[2]), Math.max(2, (w.max[0] - w.min[0]) * s), Math.max(2, (w.max[2] - w.min[2]) * s));
@@ -81,7 +109,14 @@ export class MapView {
       g.fillStyle = color;
       g.fillText(text, x, y);
     };
-    for (const z of zones) label(z.name, X((z.min[0] + z.max[0]) / 2), Z((z.min[1] + z.max[1]) / 2), '#e8dcc0');
+    // A building with rooms inside gets its name above its north wall, so it doesn't sit on the room names.
+    const isBuilding = (z: Zone) => map.buildings.some((b) => b.min[0] === z.min[0] && b.min[1] === z.min[1] && b.max[0] === z.max[0] && b.max[1] === z.max[1]);
+    const inside = (z: Zone, o: Zone) => o !== z && o.min[0] >= z.min[0] && o.max[0] <= z.max[0] && o.min[1] >= z.min[1] && o.max[1] <= z.max[1];
+    for (const z of zones) {
+      const cx = X((z.min[0] + z.max[0]) / 2);
+      if (isBuilding(z) && zones.some((o) => inside(z, o))) label(z.name, cx, Z(z.min[1]) - 10, '#ffffff');
+      else label(z.name, cx, Z((z.min[1] + z.max[1]) / 2), '#e8dcc0');
+    }
     for (const e of map.exits) {
       const cx = X((e.min[0] + e.max[0]) / 2);
       const cz = Z((e.min[2] + e.max[2]) / 2);

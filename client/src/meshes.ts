@@ -4,10 +4,11 @@ import type { GameMap, Station } from '../../shared/map.ts';
 import type { Box, Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
 import type { Theme } from '../../shared/props.ts';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { containerModel, fenceModel, floorStripes, itemModel, propModel, rackModel } from './models.ts';
 
-/** One tile per 2 m of floor. */
-function floorTexture(base: string, half: number): THREE.Texture {
+/** One tile per 2 m of floor, over `w` by `d` metres. */
+function floorTexture(base: string, w: number, d = w): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
@@ -22,7 +23,7 @@ function floorTexture(base: string, half: number): THREE.Texture {
   g.strokeRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(half, half);
+  tex.repeat.set(w / 2, d / 2);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -71,11 +72,15 @@ export function createHunterMesh(color = 0xd24b3a): THREE.Object3D {
 export interface World {
   /** Everything the camera and the disguise picker can hit. */
   colliders: THREE.Object3D[];
+  /** Call each frame with where the camera looks from, so sharp shadows follow you around a big map. */
+  follow(x: number, z: number): void;
 }
 
 interface Palette {
   sky: number;
   floor: string;
+  /** Outside, between the buildings. */
+  ground: string;
   wall: number;
   /** Shelves, partitions, containers: walls lower than the outer ones. */
   inner: number[];
@@ -84,11 +89,38 @@ interface Palette {
 }
 
 const PALETTES: Record<Theme, Palette> = {
-  warehouse: { sky: 0x1d2228, floor: '#5a5d61', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.5 },
-  office: { sky: 0x26231f, floor: '#4d5868', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
-  yard: { sky: 0x9cc4e4, floor: '#3d3f42', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
-  hideout: { sky: 0x17140f, floor: '#4a4036', wall: 0x6e6253, inner: [0x8a7a62], lamps: true, ambient: 1.6 },
+  warehouse: { sky: 0xa9b8c6, floor: '#5a5d61', ground: '#77746d', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.6 },
+  office: { sky: 0xa8c6e2, floor: '#4d5868', ground: '#8a847a', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
+  yard: { sky: 0x9cc4e4, floor: '#3d3f42', ground: '#56534d', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
+  hideout: { sky: 0x17140f, floor: '#4a4036', ground: '#4a4036', wall: 0x6e6253, inner: [0x8a7a62], lamps: true, ambient: 1.6 },
 };
+
+/** Asphalt with a dashed line down the middle of each road, merged into one mesh. */
+function roadMesh(map: GameMap): THREE.Object3D {
+  const g = new THREE.Group();
+  const asphalt: THREE.BufferGeometry[] = [];
+  const paint: THREE.BufferGeometry[] = [];
+  for (const r of map.roads) {
+    const w = r.max[0] - r.min[0];
+    const d = r.max[1] - r.min[1];
+    const cx = (r.min[0] + r.max[0]) / 2;
+    const cz = (r.min[1] + r.max[1]) / 2;
+    asphalt.push(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2).translate(cx, 0.01, cz));
+    const alongX = w > d;
+    const len = alongX ? w : d;
+    for (let t = -len / 2 + 2; t < len / 2 - 2; t += 6) {
+      const dash = alongX ? new THREE.PlaneGeometry(3, 0.18) : new THREE.PlaneGeometry(0.18, 3);
+      paint.push(dash.rotateX(-Math.PI / 2).translate(alongX ? cx + t + 1.5 : cx, 0.02, alongX ? cz : cz + t + 1.5));
+    }
+  }
+  if (!asphalt.length) return g;
+  const road = new THREE.Mesh(mergeGeometries(asphalt)!, new THREE.MeshStandardMaterial({ color: 0x2f3134, roughness: 0.95 }));
+  road.receiveShadow = true;
+  const lines = new THREE.Mesh(mergeGeometries(paint)!, new THREE.MeshStandardMaterial({ color: 0xe8d36a, roughness: 0.8 }));
+  lines.receiveShadow = true;
+  g.add(road, lines);
+  return g;
+}
 
 const STATION_LABELS: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발' };
 
@@ -165,18 +197,34 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   root.clear();
   const pal = PALETTES[map.theme];
   scene.background = new THREE.Color(pal.sky);
-  const fogScale = Math.max(1, map.half / 20);
-  scene.fog = new THREE.Fog(pal.sky, (map.theme === 'yard' ? 40 : 25) * fogScale, (map.theme === 'yard' ? 100 : 60) * fogScale);
+  scene.fog = map.half > 20 ? new THREE.Fog(pal.sky, 45, 160) : new THREE.Fog(pal.sky, 25, 60);
 
   root.add(new THREE.HemisphereLight(0xbcd3ff, 0x5a5040, pal.ambient));
   const sun = new THREE.DirectionalLight(0xfff1dc, map.theme === 'yard' ? 2.4 : 1.6);
   sun.position.set(12, 30, 8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  const s = map.half + 2;
-  Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 80 });
-  root.add(sun);
-  if (pal.lamps) {
+  // Shadows cover the area around the camera rather than the whole map, so they stay sharp.
+  const s = Math.min(map.half + 2, 50);
+  Object.assign(sun.shadow.camera, { left: -s, right: s, top: s, bottom: -s, near: 1, far: 120 });
+  root.add(sun, sun.target);
+  const follow = (x: number, z: number) => {
+    if (map.half + 2 <= s) return;
+    // Snap to whole metres so shadow edges don't shimmer as you move.
+    const fx = Math.round(x);
+    const fz = Math.round(z);
+    sun.position.set(fx + 12, 30, fz + 8);
+    sun.target.position.set(fx, 0, fz);
+  };
+  // Lamps under each building's roof.
+  for (const bld of map.buildings.slice(0, 10)) {
+    const w = bld.max[0] - bld.min[0];
+    const d = bld.max[1] - bld.min[1];
+    const lamp = new THREE.PointLight(0xffe2b0, Math.min(60, w * d * 0.05), Math.max(w, d) * 1.1, 1.4);
+    lamp.position.set((bld.min[0] + bld.max[0]) / 2, bld.height - 0.6, (bld.min[1] + bld.max[1]) / 2);
+    root.add(lamp);
+  }
+  if (pal.lamps && map.buildings.length === 0) {
     // Ceiling lamps for some local light pools: a 3x3 grid on big maps, corners and middle on small ones.
     const r = map.half > 20 ? map.half * 0.6 : Math.min(8, map.half - 3);
     const spots = map.half > 20
@@ -190,14 +238,39 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   }
 
   const colliders: THREE.Object3D[] = [];
+  const outside = map.buildings.length > 0 || map.roads.length > 0;
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(map.half * 2, map.half * 2),
-    new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor, map.half), roughness: 0.95 }),
+    new THREE.MeshStandardMaterial({ map: floorTexture(outside ? pal.ground : pal.floor, map.half * 2), roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   root.add(floor);
   colliders.push(floor);
+  root.add(roadMesh(map));
+  // Each building gets its own floor and a roof (the roof is only drawn: nothing stands on it).
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x5b5f63, roughness: 0.9 });
+  // The underside, lit a little on its own so ceilings aren't black.
+  const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xc9c6bf, emissive: 0x3a3936, roughness: 0.95 });
+  for (const bld of map.buildings) {
+    const w = bld.max[0] - bld.min[0];
+    const d = bld.max[1] - bld.min[1];
+    const cx = (bld.min[0] + bld.max[0]) / 2;
+    const cz = (bld.min[1] + bld.max[1]) / 2;
+    const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor, w, d), roughness: 0.9 }));
+    inside.rotation.x = -Math.PI / 2;
+    inside.position.set(cx, 0.015, cz);
+    inside.receiveShadow = true;
+    root.add(inside);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.3, d + 0.6), roofMat);
+    roof.position.set(cx, bld.height + 0.15, cz);
+    roof.castShadow = true;
+    roof.receiveShadow = true;
+    const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(w, d), ceilingMat);
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(cx, bld.height - 0.01, cz);
+    root.add(roof, ceiling);
+  }
 
   const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, roughness: 0.9 });
   const innerMats = pal.inner.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 }));
@@ -205,13 +278,13 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const thin = (w: Box) => Math.min(w.max[0] - w.min[0], w.max[2] - w.min[2]);
   const isRack = (w: Box) => map.theme === 'warehouse' && [2.4, 3.2, 4.2].includes(w.max[1]) && thin(w) <= 1.3 && thin(w) > 0.5;
   const isFence = (w: Box) => map.theme === 'warehouse' && w.max[1] === 2.5 && thin(w) <= 0.31;
-  const isContainer = (w: Box) => map.theme === 'yard' && w.max[1] > 2 && w.max[1] < map.wallHeight + 2 && Math.abs(thin(w) - 2.4) < 0.01;
+  const isContainer = (w: Box) => w.max[1] > 2 && w.max[1] < map.wallHeight + 2 && Math.abs(thin(w) - 2.4) < 0.01;
   const racks = map.walls.filter(isRack);
   const containers = map.walls.filter(isContainer);
   const fences = map.walls.filter(isFence);
   for (const [geo, mat] of [
     [racks.length ? rackModel(racks, map.seed) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 })],
-    [containers.length ? containerModel(containers, pal.inner) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 })],
+    [containers.length ? containerModel(containers, PALETTES.yard.inner) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 })],
     [fences.length ? fenceModel(fences) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.5 })],
   ] as const) {
     if (!geo) continue;
@@ -224,7 +297,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   map.walls.forEach((w, i) => {
     if (isRack(w) || isContainer(w) || isFence(w)) return;
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
-    const mat = size[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
+    const mat = w.max[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
     mesh.position.set((w.min[0] + w.max[0]) / 2, (w.min[1] + w.max[1]) / 2, (w.min[2] + w.max[2]) / 2);
     mesh.castShadow = true;
@@ -267,7 +340,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
       root.add(label);
     }
   }
-  return { colliders };
+  return { colliders, follow };
 }
 
 /** A small glowing pickup. Origin at its bottom. */

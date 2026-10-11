@@ -25,6 +25,17 @@ export interface Zone {
   max: [number, number];
 }
 
+/** A flat rectangle on the floor, e.g. a road. */
+export interface Area {
+  min: [number, number];
+  max: [number, number];
+}
+
+/** A building's footprint and wall height; the client puts a floor and a roof on it. */
+export interface Building extends Area {
+  height: number;
+}
+
 type Side = 'n' | 's' | 'w' | 'e';
 
 /** Chance and choices for what goes on top of a prop placed in a line. */
@@ -42,6 +53,8 @@ const TOPS: Record<string, [number, string[]]> = {
   generator: [0.3, ['toolbox', 'gasCan']],
 };
 const DOOR = 2.4;
+/** Tall walls get a lintel over each doorway from this height, so doors look like doors. */
+const LINTEL = 2.6;
 
 /**
  * Collects a map's walls, props and zones. Everything is placed through it so
@@ -52,6 +65,8 @@ export class Builder {
   props: StaticProp[] = [];
   propBoxes: Box[] = [];
   zones: Zone[] = [];
+  roads: Area[] = [];
+  buildings: Building[] = [];
   private clear: Box[] = [];
 
   constructor(readonly rand: () => number, readonly half: number) {}
@@ -73,8 +88,8 @@ export class Builder {
     this.clear.push({ min: [x0, 0, z0], max: [x1, 3, z1] });
   }
 
-  wall(x0: number, z0: number, x1: number, z1: number, height = 3) {
-    this.walls.push({ min: [Math.min(x0, x1), 0, Math.min(z0, z1)], max: [Math.max(x0, x1), height, Math.max(z0, z1)] });
+  wall(x0: number, z0: number, x1: number, z1: number, height = 3, y0 = 0) {
+    this.walls.push({ min: [Math.min(x0, x1), y0, Math.min(z0, z1)], max: [Math.max(x0, x1), height, Math.max(z0, z1)] });
   }
 
   /**
@@ -88,18 +103,47 @@ export class Builder {
     this.partitionX(x1, z0, z1, doors.e ?? [], height);
   }
 
+  /** A building: outer walls with doorways, a roof (drawn by the client) and its name as a zone. */
+  building(name: string, x0: number, z0: number, x1: number, z1: number, doors: Partial<Record<Side, number[]>>, height: number) {
+    this.room(x0, z0, x1, z1, doors, height);
+    this.buildings.push({ min: [x0, z0], max: [x1, z1], height });
+    this.zone(name, x0, z0, x1, z1);
+    // Keep a step clear outside every door, so nothing outside blocks the way in.
+    for (const d of doors.n ?? []) this.keepClear(d - 1.6, z0 - 3, d + 1.6, z0);
+    for (const d of doors.s ?? []) this.keepClear(d - 1.6, z1, d + 1.6, z1 + 3);
+    for (const d of doors.w ?? []) this.keepClear(x0 - 3, d - 1.6, x0, d + 1.6);
+    for (const d of doors.e ?? []) this.keepClear(x1, d - 1.6, x1 + 3, d + 1.6);
+  }
+
+  /** A road: drawn on the ground and kept free of props. */
+  road(x0: number, z0: number, x1: number, z1: number) {
+    this.roads.push({ min: [x0, z0], max: [x1, z1] });
+    this.keepClear(x0, z0, x1, z1);
+  }
+
+  /** The same builder with every coordinate given relative to (ox, oz). */
+  at(ox: number, oz: number): Local {
+    return new Local(this, ox, oz);
+  }
+
   /** A wall along x = `x` from z0 to z1, with doorways centered at `doors`. */
   partitionX(x: number, z0: number, z1: number, doors: number[], height = 3) {
     if (Math.abs(x) >= this.half) return;
     for (const [a, b] of this.segments(z0, z1, doors)) this.wall(x - 0.15, a, x + 0.15, b, height);
-    for (const d of doors) this.keepClear(x - 1.6, d - DOOR / 2, x + 1.6, d + DOOR / 2);
+    for (const d of doors) {
+      this.keepClear(x - 1.6, d - DOOR / 2, x + 1.6, d + DOOR / 2);
+      if (height > LINTEL + 0.5) this.wall(x - 0.15, d - DOOR / 2, x + 0.15, d + DOOR / 2, height, LINTEL);
+    }
   }
 
   /** A wall along z = `z` from x0 to x1, with doorways centered at `doors`. */
   partitionZ(z: number, x0: number, x1: number, doors: number[], height = 3) {
     if (Math.abs(z) >= this.half) return;
     for (const [a, b] of this.segments(x0, x1, doors)) this.wall(a, z - 0.15, b, z + 0.15, height);
-    for (const d of doors) this.keepClear(d - DOOR / 2, z - 1.6, d + DOOR / 2, z + 1.6);
+    for (const d of doors) {
+      this.keepClear(d - DOOR / 2, z - 1.6, d + DOOR / 2, z + 1.6);
+      if (height > LINTEL + 0.5) this.wall(d - DOOR / 2, z - 0.15, d + DOOR / 2, z + 0.15, height, LINTEL);
+    }
   }
 
   private segments(from: number, to: number, doors: number[]): [number, number][] {
@@ -216,5 +260,90 @@ export class Builder {
       this.prop('chair', x, cz - 0.8, 0);
       this.prop('chair', x, cz + 0.8, 2);
     }
+  }
+}
+
+/**
+ * A Builder seen from a local origin, so an area can be laid out around its own
+ * middle and then put anywhere on the map. Boxes it returns are in map coordinates.
+ */
+export class Local {
+  constructor(readonly b: Builder, readonly ox: number, readonly oz: number) {}
+
+  pick<T>(list: readonly T[]): T {
+    return this.b.pick(list);
+  }
+
+  chance(p: number) {
+    return this.b.chance(p);
+  }
+
+  private doors(d: Partial<Record<Side, number[]>>): Partial<Record<Side, number[]>> {
+    return {
+      n: d.n?.map((x) => x + this.ox),
+      s: d.s?.map((x) => x + this.ox),
+      w: d.w?.map((z) => z + this.oz),
+      e: d.e?.map((z) => z + this.oz),
+    };
+  }
+
+  zone(name: string, x0: number, z0: number, x1: number, z1: number) {
+    this.b.zone(name, x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz);
+  }
+
+  keepClear(x0: number, z0: number, x1: number, z1: number) {
+    this.b.keepClear(x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz);
+  }
+
+  wall(x0: number, z0: number, x1: number, z1: number, height = 3) {
+    this.b.wall(x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, height);
+  }
+
+  room(x0: number, z0: number, x1: number, z1: number, doors: Partial<Record<Side, number[]>>, height = 3) {
+    this.b.room(x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, this.doors(doors), height);
+  }
+
+  building(name: string, x0: number, z0: number, x1: number, z1: number, doors: Partial<Record<Side, number[]>>, height: number) {
+    this.b.building(name, x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, this.doors(doors), height);
+  }
+
+  partitionX(x: number, z0: number, z1: number, doors: number[], height = 3) {
+    this.b.partitionX(x + this.ox, z0 + this.oz, z1 + this.oz, doors.map((d) => d + this.oz), height);
+  }
+
+  partitionZ(z: number, x0: number, x1: number, doors: number[], height = 3) {
+    this.b.partitionZ(z + this.oz, x0 + this.ox, x1 + this.ox, doors.map((d) => d + this.ox), height);
+  }
+
+  prop(type: string, x: number, z: number, rot: Rot = 0, y = 0) {
+    return this.b.prop(type, x + this.ox, z + this.oz, rot, y);
+  }
+
+  onTop(base: Box | null, type: string, rot: Rot = 0) {
+    return this.b.onTop(base, type, rot);
+  }
+
+  line(types: readonly string[], x0: number, z0: number, x1: number, z1: number, spacing: number, fill = 0.8, rot?: Rot) {
+    this.b.line(types, x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, spacing, fill, rot);
+  }
+
+  edges(types: readonly string[], x0: number, z0: number, x1: number, z1: number, inset: number, spacing: number, fill = 0.7) {
+    this.b.edges(types, x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, inset, spacing, fill);
+  }
+
+  scatter(types: readonly string[], x0: number, z0: number, x1: number, z1: number, count: number) {
+    this.b.scatter(types, x0 + this.ox, z0 + this.oz, x1 + this.ox, z1 + this.oz, count);
+  }
+
+  cluster(types: readonly string[], x: number, z: number, radius: number, count: number) {
+    this.b.cluster(types, x + this.ox, z + this.oz, radius, count);
+  }
+
+  desk(x: number, z: number, rot: 0 | 1 = 0) {
+    this.b.desk(x + this.ox, z + this.oz, rot);
+  }
+
+  meetingTable(cx: number, cz: number, length: number) {
+    this.b.meetingTable(cx + this.ox, cz + this.oz, length);
   }
 }

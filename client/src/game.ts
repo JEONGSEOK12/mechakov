@@ -482,6 +482,7 @@ export class Game {
     if (this.hideout.open && now - this.lastHideoutRender > 500) this.renderHideout();
     this.updateHud(me);
     this.rocketFx.update();
+    this.world.follow(this.camera.position.x, this.camera.position.z);
     if (myPos) this.mapView.draw(myPos.x, myPos.z, this.controls.yaw);
 
     for (const t of this.tracers) {
