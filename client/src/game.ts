@@ -10,7 +10,7 @@ import { canDisguiseAs, type Profile } from '../../shared/upgrades.ts';
 import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
 import { Hideout } from './hideout.ts';
-import { Hud } from './hud.ts';
+import { Hud, resultText } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
 
@@ -94,7 +94,7 @@ export class Game {
 
   private worldRoot = new THREE.Group();
 
-  constructor(private net: Connection, private myId: number, seed: number, theme: Theme, private profile: Profile) {
+  constructor(private net: Connection, private myId: number, seed: number, theme: Theme, private profile: Profile, private manualStart = false) {
     this.scene.add(this.worldRoot);
     this.map = generateMap(seed, theme);
     this.world = buildWorld(this.scene, this.worldRoot, this.map);
@@ -129,6 +129,7 @@ export class Game {
       this.renderHideout();
     };
     this.hideout.onUpgrade = (id) => this.net.send({ t: 'upgrade', id });
+    this.hideout.onStart = () => this.net.send({ t: 'start' });
     this.controls.onAddBot = () => {
       if (this.phase === 'lobby' || this.phase === 'countdown') this.net.send({ t: 'addBot' });
     };
@@ -198,11 +199,18 @@ export class Game {
 
   private onSnap(msg: Extract<ServerMsg, { t: 'snap' }>) {
     const prevMe = this.me;
+    // The last raid's result stays up (and in the lobby) until the next one starts.
+    if (msg.phase === 'countdown' && this.phase !== 'countdown') this.result = null;
     this.phase = msg.phase;
     this.timeLeft = msg.timeLeft;
     this.timeAt = performance.now();
     this.latest = new Map(msg.players.map((p) => [p.id, p]));
     this.roster = new Map(msg.roster.map((p) => [p.id, p]));
+    if (this.manualStart) {
+      const wasLobby = this.hideout.lobby;
+      this.hideout.setLobby(this.phase === 'lobby', this.result ? `지난 레이드: ${resultText(this.result.outcome, this.result.items)}` : '');
+      if (this.hideout.lobby && !wasLobby) this.renderHideout();
+    }
     this.snaps.push({ at: this.timeAt, players: this.latest });
     while (this.snaps.length > 30) this.snaps.shift();
 
@@ -434,7 +442,7 @@ export class Game {
 
   private updateHud(me: PlayerSnap | undefined) {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
-    this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme]);
+    this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart);
     this.hud.me(me, this.phase);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
     this.hud.inventory(this.inventoryOpen, {
@@ -458,8 +466,7 @@ export class Game {
     const inRaid = !!me?.alive && me.role !== 'spectator' && (this.phase === 'hide' || this.phase === 'hunt');
     this.hud.bag(this.bag, this.bagCapacity, inRaid);
     this.hud.extract(me?.alive ? me.extracting : 0);
-    if (this.phase === 'lobby' || this.phase === 'countdown' || this.phase === 'hide') this.result = null;
-    this.hud.result(this.result?.outcome ?? null, this.result?.items ?? []);
+    this.hud.result(this.phase === 'lobby' ? null : this.result?.outcome ?? null, this.result?.items ?? []);
 
     const hints: string[] = [];
     if (this.pickupTarget !== null) {
@@ -468,7 +475,7 @@ export class Game {
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
     if (this.disguiseLocked !== null) hints.push(`${PROPS[this.map.props[this.disguiseLocked].type].name}: 변신 도감 업그레이드 필요`);
-    if (this.phase === 'lobby' || this.phase === 'countdown') hints.push('B: 프롭 봇 추가');
+    if (!this.manualStart && (this.phase === 'lobby' || this.phase === 'countdown')) hints.push('B: 프롭 봇 추가');
     let hint = hints.join(' · ');
     if (me?.role === 'prop' && me.alive && this.faceLocked) hint += `${hint ? ' · ' : ''}방향 고정됨 (R)`;
     if (!this.controls.active && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';

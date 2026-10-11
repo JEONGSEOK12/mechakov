@@ -159,3 +159,27 @@ test('with hunters off, the person is a prop and can loot and extract right away
   assert.ok(human.extracted, 'extracted during the hiding phase');
   assert.equal(human.profile.stash[item.type], 1);
 });
+
+test('with auto start off, the room waits for start and ends once the person is out', () => {
+  const room = new Room('solo-lobby', 7, timings);
+  room.hunters = false;
+  room.autoStart = false;
+  const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  room.addBot();
+  const phase = () => room.phase;
+  for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
+  assert.equal(phase(), 'lobby', 'waits without a start');
+
+  room.handle(human, { t: 'start' });
+  for (let i = 0; i < 2 / TICK_DT && phase() !== 'hide'; i++) room.tick();
+  assert.equal(phase(), 'hide');
+
+  const exit = room.map.exits[0];
+  human.body.pos = [(exit.min[0] + exit.max[0]) / 2, 0, (exit.min[2] + exit.max[2]) / 2];
+  room.phaseEnds = room.time + 20;
+  for (let i = 0; i < 1 / TICK_DT && phase() !== 'end'; i++) room.tick();
+  assert.equal(human.outcome, 'extracted');
+  assert.equal(phase(), 'end', 'round ends without waiting for the bot');
+  for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
+  assert.equal(phase(), 'lobby', 'back in the lobby, waiting again');
+});

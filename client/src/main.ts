@@ -35,7 +35,7 @@ function play(net: Connection, name: string, token?: string) {
         // Without storage the profile only lasts for this visit.
       }
       form.classList.add('hidden');
-      new Game(net, msg.id, msg.seed, msg.theme, msg.profile).start();
+      new Game(net, msg.id, msg.seed, msg.theme, msg.profile, msg.manualStart).start();
     } else if (msg.t === 'error') {
       error.textContent = msg.message;
     }

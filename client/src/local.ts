@@ -34,6 +34,7 @@ export class LocalNet implements Connection {
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     this.room = new Room('solo', Math.floor(Math.random() * 1e9), DEFAULT_TIMINGS, { save: () => this.saveProfile() }, theme);
     this.room.hunters = false;
+    this.room.autoStart = false;
     this.room.start();
   }
 
