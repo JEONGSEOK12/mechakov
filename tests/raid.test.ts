@@ -255,7 +255,7 @@ test('props can fight each other with rockets, and a dead prop drops its loot', 
   other.bag = ['gpu'];
   me.body.pos = [0, 0, 4];
   other.body.pos = [0, 0, -3];
-  const lootBefore = room.loot.size;
+  const lootBefore = new Set(room.loot.keys());
   const shots = () => {
     me.lastRocket = -Infinity;
     room.handle(me, { t: 'rocket', origin: [0, 1.4, 5.5], dir: [0, -1.4, -8] });
@@ -268,9 +268,12 @@ test('props can fight each other with rockets, and a dead prop drops its loot', 
   assert.equal(me.hp, 100);
   for (let i = 0; i < 20 && other.alive; i++) shots();
   assert.equal(other.alive, false, 'killed');
-  assert.equal(room.loot.size, lootBefore + 1);
-  const gpu = [...room.loot.values()].find((l) => l.type === 'gpu');
-  assert.ok(gpu && Math.hypot(gpu.pos[0], gpu.pos[2] + 3) < 1, 'its gpu is on the floor where it fell');
+  // Only the new loot: the map may have spawned a gpu of its own.
+  const dropped = [...room.loot.values()].filter((l) => !lootBefore.has(l.id));
+  assert.equal(dropped.length, 1);
+  const gpu = dropped[0];
+  assert.equal(gpu.type, 'gpu');
+  assert.ok(Math.hypot(gpu.pos[0], gpu.pos[2] + 3) < 1, 'its gpu is on the floor where it fell');
   // And the winner can pick it up.
   me.body.pos = [gpu.pos[0], 0, gpu.pos[2]];
   room.handle(me, { t: 'pickup', lootId: gpu.id });
