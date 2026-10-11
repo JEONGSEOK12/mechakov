@@ -217,7 +217,7 @@ test('prop rockets throw a hunter into the air and hurt them a little', () => {
   assert.equal(room.rockets.size, 0, 'the rocket went off');
   assert.ok(Math.abs(hunter.body.vz) > 1, 'pushed away from the blast');
   assert.ok(hunter.hp < hp && hunter.hp > hp - 25, `a little damage (${hp} -> ${hunter.hp})`);
-  assert.equal(prop.hp, 100, 'props are not hurt by rockets');
+  assert.equal(prop.hp, 100, 'the shooter is not hurt by their own rocket');
 
   // The cooldown stops a second rocket straight away.
   room.handle(prop, { t: 'rocket', origin, dir: [0, -1, -1] });
@@ -243,4 +243,39 @@ test('a prop can rocket jump off the floor under itself', () => {
     top = Math.max(top, me.body.pos[1]);
   }
   assert.ok(top > 1.5, `flew ${top.toFixed(2)} m up`);
+});
+
+test('props can fight each other with rockets, and a dead prop drops its loot', () => {
+  const room = new Room('fight', 7, { ...timings, hunt: 60 });
+  room.hunters = false;
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  assert.equal(other.role, 'prop');
+  other.bag = ['gpu'];
+  me.body.pos = [0, 0, 4];
+  other.body.pos = [0, 0, -3];
+  const lootBefore = new Set(room.loot.keys());
+  const shots = () => {
+    me.lastRocket = -Infinity;
+    room.handle(me, { t: 'rocket', origin: [0, 1.4, 5.5], dir: [0, -1.4, -8] });
+    for (let i = 0; i < 24; i++) room.tick();
+    other.body.pos = [0, 0, -3];
+    other.body.vx = other.body.vz = other.body.vy = 0;
+  };
+  shots();
+  assert.ok(other.hp < 100, `hurt by another prop (${other.hp})`);
+  assert.equal(me.hp, 100);
+  for (let i = 0; i < 20 && other.alive; i++) shots();
+  assert.equal(other.alive, false, 'killed');
+  // Only the new loot: the map may have spawned a gpu of its own.
+  const dropped = [...room.loot.values()].filter((l) => !lootBefore.has(l.id));
+  assert.equal(dropped.length, 1);
+  const gpu = dropped[0];
+  assert.equal(gpu.type, 'gpu');
+  assert.ok(Math.hypot(gpu.pos[0], gpu.pos[2] + 3) < 1, 'its gpu is on the floor where it fell');
+  // And the winner can pick it up.
+  me.body.pos = [gpu.pos[0], 0, gpu.pos[2]];
+  room.handle(me, { t: 'pickup', lootId: gpu.id });
+  assert.deepEqual(me.bag, ['gpu']);
 });

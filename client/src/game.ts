@@ -205,7 +205,7 @@ export class Game {
         const d = this.camera.position.distanceTo(new THREE.Vector3(...msg.pos));
         sfx.explosion(d);
         this.shake(Math.max(0, 0.45 * (1 - d / 14)), 350);
-        if (msg.from === this.myId && msg.hit.some((id) => id !== this.myId && this.roster.get(id)?.role === 'hunter')) {
+        if (msg.from === this.myId && msg.hit.some((id) => id !== this.myId)) {
           this.hud.hitmarker();
           sfx.hitConfirm();
         }
