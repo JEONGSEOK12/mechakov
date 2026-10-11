@@ -83,6 +83,7 @@ for (const theme of THEMES) {
       assert.ok(map.props.every((p) => PROPS[p.type].themes.includes(theme)));
       assert.ok(map.propSpawns.length >= 12, `${theme}/${seed}: ${map.propSpawns.length} spawns`);
       assert.ok(map.lootSpots.length >= 30);
+      assert.ok(map.zones.length >= 5, `${theme}/${seed}: ${map.zones.length} zones`);
       for (const e of map.exits) {
         const zone = { min: e.min, max: [e.max[0], 2, e.max[2]] as [number, number, number] };
         assert.ok(!map.solids.some((s) => overlaps(zone, s)), `${theme}/${seed}: exit blocked`);

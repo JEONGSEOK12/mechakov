@@ -57,6 +57,12 @@ export class Hud {
     $('crosshair').classList.toggle('hidden', !(me.alive && me.role === 'hunter'));
   }
 
+  /** The named area you're standing in, e.g. 사무실 inside the warehouse. */
+  zone(name: string) {
+    const el = $('zone');
+    if (el.textContent !== name) el.textContent = name;
+  }
+
   /** Sprint stamina, 0..1; orange while out of breath. Hidden when not moving around. */
   stamina(value: number | null, winded: boolean) {
     const bar = $('stamina-bar');

@@ -1,15 +1,9 @@
-import { PROPS, PROP_TYPES, type Theme } from './props.ts';
+import type { Theme } from './props.ts';
 import { boxAt, overlaps } from './geometry.ts';
+import { Builder, propSize, type StaticProp, type Zone } from './layouts.ts';
 import type { Box, Vec3 } from './types.ts';
 
-export interface StaticProp {
-  id: number;
-  type: string;
-  /** Bottom center. */
-  pos: Vec3;
-  /** Quarter turns around Y (0 or 1). */
-  rot: 0 | 1;
-}
+export { propSize, type StaticProp, type Zone } from './layouts.ts';
 
 export interface GameMap {
   seed: number;
@@ -29,17 +23,14 @@ export interface GameMap {
   exits: Box[];
   /** Places loot can appear: open floor and the tops of low props. */
   lootSpots: Vec3[];
+  /** Named areas, e.g. the office inside the warehouse. */
+  zones: Zone[];
   /** Hideout only: where to stand to use the stash, the workbench and the raid door. */
   stations?: Record<Station, Vec3>;
 }
 
 export type Station = 'stash' | 'bench' | 'door';
 export const STATION_RANGE = 1.8;
-
-export function propSize(type: string, rot: 0 | 1 = 0): Vec3 {
-  const s = PROPS[type].size;
-  return rot ? [s[2], s[1], s[0]] : [s[0], s[1], s[2]];
-}
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -52,82 +43,210 @@ function mulberry32(seed: number) {
   };
 }
 
+/** Half-width of the open middle where hunters spawn. */
 const CLEAR_ZONE = 6;
 
 export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
 export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처' };
 
-const HALF = 32;
-/** The interior layouts were drawn for a 40 m map; this stretches them to the current size. */
-const S = HALF / 20;
+/** Raid maps are 100 m across. */
+const HALF = 50;
 
-/** Interior walls for each theme. They must leave the middle and the exit corners open. */
-function interiorWalls(theme: Theme, rand: () => number, exits: Box[]): Box[] {
-  const walls: Box[] = [];
-  if (theme === 'warehouse') {
-    // Shelving rows on both sides of the middle aisle; the one by the office is shorter.
-    for (const x of [-15, -12.5, -10, 10, 12.5, 15]) {
-      for (const [z0, z1] of [[-17, -7], [7, 17]]) {
-        const [a, b] = x > 12 && z0 < 0 ? [-10, -3] : [z0, z1];
-        walls.push({ min: [x * S - 0.6, 0, a * S], max: [x * S + 0.6, 3.2, b * S] });
-      }
-    }
-    // A small office in the far corner, with a doorway onto the aisle beside it.
-    walls.push({ min: [12 * S, 0, -HALF], max: [12 * S + 0.3, 3, -17 * S] });
-    walls.push({ min: [12 * S, 0, -15 * S], max: [12 * S + 0.3, 3, -12 * S] });
-    walls.push({ min: [12 * S, 0, -12 * S - 0.3], max: [HALF, 3, -12 * S] });
-    // Low dividers along the middle aisle.
-    walls.push({ min: [-6 * S, 0, -12 * S], max: [-6 * S + 0.3, 1.2, -8 * S] });
-    walls.push({ min: [6 * S - 0.3, 0, 8 * S], max: [6 * S, 1.2, 12 * S] });
-  } else if (theme === 'office') {
-    // Four corner rooms around a cross-shaped hall, each with two doorways.
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const x = sx * 8 * S;
-        const z = sz * 8 * S;
-        const span = (a: number, b: number) => [Math.min(a, b), Math.max(a, b)];
-        // Wall along x = ±8 with a door around z = ±14 (in 40 m units).
-        for (const [z0, z1] of [span(z, sz * 13 * S), span(sz * 15 * S, sz * HALF)]) {
-          walls.push({ min: [x - 0.15, 0, z0], max: [x + 0.15, 3, z1] });
-        }
-        // Wall along z = ±8 with a door around x = ±14.
-        for (const [x0, x1] of [span(x, sx * 13 * S), span(sx * 15 * S, sx * HALF)]) {
-          walls.push({ min: [x0, 0, z - 0.15], max: [x1, 3, z + 0.15] });
-        }
-      }
-    }
-    // Cubicle partitions in the arms of the hall.
-    for (const s of [-1, 1]) {
-      const [a, b] = [Math.min(s * 10 * S, s * 18 * S), Math.max(s * 10 * S, s * 18 * S)];
-      for (const off of [-4 * S, 0, 4 * S]) {
-        walls.push({ min: [off - 0.1, 0, a], max: [off + 0.1, 1.4, b] });
-        walls.push({ min: [a, 0, off - 0.1], max: [b, 1.4, off + 0.1] });
-      }
-    }
-  } else {
-    // Shipping containers dropped around the yard.
-    const keepClear = exits.map((e): Box => ({ min: [e.min[0] - 1, 0, e.min[2] - 1], max: [e.max[0] + 1, 3, e.max[2] + 1] }));
-    let attempts = 0;
-    while (walls.length < 22 && attempts < 1500) {
-      attempts++;
-      const rot = rand() < 0.5;
-      const [w, d] = rot ? [6, 2.4] : [2.4, 6];
-      const x = (rand() * 2 - 1) * (HALF - 4);
-      const z = (rand() * 2 - 1) * (HALF - 4);
-      const box: Box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, 2.6, z + d / 2] };
-      const padded: Box = { min: [box.min[0] - 1.5, 0, box.min[2] - 1.5], max: [box.max[0] + 1.5, 3, box.max[2] + 1.5] };
-      const middle: Box = { min: [-CLEAR_ZONE - 1, 0, -CLEAR_ZONE - 1], max: [CLEAR_ZONE + 1, 3, CLEAR_ZONE + 1] };
-      if ([middle, ...keepClear, ...walls].some((o) => overlaps(padded, o))) continue;
-      walls.push(box);
+// Prop groups by what kind of place they belong in.
+const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket'];
+const DOCK = ['pallet', 'forkPallet', 'crate', 'crate', 'smallBox', 'sack'];
+const WORKSHOP = ['toolbox', 'gasCan', 'spool', 'barrel', 'bucket', 'tire', 'extinguisher'];
+const OFFICE_WALL = ['cabinet', 'bookshelf', 'plant', 'cooler', 'printer', 'locker'];
+const LOUNGE = ['sofa', 'plant', 'cooler', 'trashCan', 'floorLamp', 'chair'];
+const SERVER = ['locker', 'cabinet', 'smallBox', 'smallBox', 'monitor'];
+const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp'];
+const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher'];
+const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier'];
+
+/**
+ * A big warehouse: shelving aisles in the main hall, a walled office block in
+ * one corner (open office, manager's office, break room), a workshop on the
+ * west side and a loading dock along the south wall.
+ */
+function warehouse(b: Builder) {
+  const h = b.half;
+  b.zone('보관 창고', -h, -h, h, 34);
+  // Office block in the north-east corner.
+  b.zone('사무 구역', 20, -h, h, -25);
+  b.room(20, -h, h, -25, { w: [-31], s: [27, 42] });
+  b.partitionX(35, -h, -25, [-44, -31]);
+  b.partitionZ(-37.5, 35, h, [42.5]);
+  b.zone('사무실', 20, -h, 35, -25);
+  b.deskRows(21, -48.5, 34, -33);
+  b.edges(OFFICE_WALL, 20, -h, 35, -25, 0.6, 2.2, 0.5);
+  b.zone('관리자실', 35, -h, h, -37.5);
+  b.desk(42.5, -45, 0);
+  b.line(['bookshelf', 'cabinet', 'plant'], 36.5, -49.4, 48.5, -49.4, 1.6, 0.8, 0);
+  b.prop('sofa', 42.5, -39.3);
+  b.zone('휴게실', 35, -37.5, h, -25);
+  b.line(LOUNGE, 36.5, -26.2, 48.5, -26.2, 1.9, 0.9, 0);
+  b.scatter(['chair', 'trashCan', 'plant', 'cooler'], 37, -35, 48, -29, 6);
+
+  // Workshop on the west wall.
+  b.zone('정비실', -h, -24, -32, -6);
+  b.room(-h, -24, -32, -6, { e: [-15], s: [-41] });
+  b.edges(WORKSHOP, -h, -24, -32, -6, 0.6, 1.4, 0.75);
+  b.cluster(['toolbox', 'spool', 'gasCan', 'generator'], -41, -15, 3, 5);
+
+  // Loading dock along the south wall, between the exits.
+  b.zone('하역장', -h, 34, h, h);
+  for (const x of [-22, -10, 10, 22]) b.wall(x - 1.2, 41, x + 1.2, 49, 2.6);
+  for (let x = -40; x <= 40; x += 4) {
+    if (Math.abs(x) < 8) continue;
+    b.line(DOCK, x, 36, x, 39.5, 1.6, 0.7, 0);
+  }
+  b.line(['cone'], -6, 37, 6, 37, 1.5, 1);
+
+  // Shelving aisles in the main hall, leaving the middle cross open.
+  for (const x of [-27, -22, -17, -12, 12, 17]) {
+    for (const [z0, z1] of [[-46, -28], [-22, -9], [9, 30]]) {
+      if (x < -30 && z0 === -22) continue;
+      b.wall(x - 0.6, z0, x + 0.6, z1, 3.2);
+      b.line(STORAGE, x - 1.4, z0 + 0.8, x - 1.4, z1 - 0.8, 1.5, 0.55);
+      b.line(STORAGE, x + 1.4, z0 + 0.8, x + 1.4, z1 - 0.8, 1.5, 0.55);
     }
   }
-  return walls;
+  // East side of the hall: pallet stacks and barrels in blocks.
+  for (let x = 24; x <= 44; x += 5) {
+    for (let z = -16; z <= 28; z += 6) b.cluster(['pallet', 'crate', 'barrel', 'forkPallet'], x, z, 1.6, 3);
+  }
+  b.scatter(['cone', 'bucket', 'extinguisher', 'tire'], -h + 2, -h + 2, h - 2, 33, 18);
 }
 
 /**
- * A map for one of the themes: outer walls, theme-specific interior, props,
- * exits in three corners and an open middle where hunters spawn. The same seed
- * and theme always give the same map, so the server only sends those two.
+ * An office floor: two corridors crossing in the middle, an open office with
+ * cubicles, meeting rooms and private offices, a server room, a lounge and a
+ * second open office with a storage room.
+ */
+function office(b: Builder) {
+  const h = b.half;
+  const c = 3.5;
+  b.zone('복도', -c, -h, c, h);
+  b.zone('복도', -h, -c, h, c);
+  b.line(CORRIDOR, -c + 0.6, -h + 6, -c + 0.6, -10, 5, 0.7, 1);
+  b.line(CORRIDOR, c - 0.6, 10, c - 0.6, h - 6, 5, 0.7, 1);
+  b.line(CORRIDOR, 10, -c + 0.6, h - 6, -c + 0.6, 5, 0.7, 0);
+  b.line(CORRIDOR, -h + 6, c - 0.6, -10, c - 0.6, 5, 0.7, 0);
+
+  // North-west: open office with cubicle partitions.
+  b.zone('오픈 오피스', -h, -h, -c, -c);
+  b.room(-h, -h, -c, -c, { e: [-40, -15], s: [-38, -15] });
+  for (const z of [-42, -32, -22, -12]) b.wall(-44, z - 0.08, -10, z + 0.08, 1.4);
+  b.deskRows(-46, -47, -9, -6, 0.6);
+  b.edges(OFFICE_WALL, -h, -h, -c, -c, 0.6, 3, 0.4);
+
+  // North-east: four rooms.
+  b.room(c, -h, h, -c, { w: [-38, -15], s: [15, 38] });
+  b.partitionX(27, -h, -c, [-38, -15]);
+  b.partitionZ(-27, c, h, [15, 38]);
+  b.zone('회의실', c, -h, 27, -27);
+  b.meetingTable(15, -38.5, 12);
+  b.edges(['plant', 'cooler', 'floorLamp'], c, -h, 27, -27, 0.6, 4, 0.5);
+  b.zone('서버실', 27, -h, h, -27);
+  for (let x = 30; x <= 47; x += 3) b.line(SERVER, x, -47, x, -31, 1.1, 0.8, 1);
+  b.zone('임원실', c, -27, 27, -c);
+  b.desk(15, -18, 0);
+  b.desk(9, -10, 1);
+  b.line(['bookshelf', 'cabinet', 'plant'], c + 1, -26.3, 26, -26.3, 1.8, 0.7, 0);
+  b.prop('sofa', 21, -8);
+  b.zone('복사실', 27, -27, h, -c);
+  b.edges(['copier', 'printer', 'cabinet', 'trashCan'], 27, -27, h, -c, 0.8, 2, 0.8);
+
+  // South-west: lounge and cafeteria.
+  b.zone('라운지', -h, c, -c, h);
+  b.room(-h, c, -c, h, { e: [15, 38], n: [-15, -38] });
+  b.edges(LOUNGE, -h, c, -c, h, 0.7, 2.2, 0.6);
+  for (let x = -40; x <= -12; x += 7) {
+    for (let z = 14; z <= 40; z += 7) {
+      const t = b.prop('desk', x, z);
+      if (t) for (const [dx, dz] of [[0, -0.8], [0, 0.8]]) b.prop('chair', x + dx, z + dz);
+      if (t && b.chance(0.4)) b.onTop(t, b.pick(['smallBox', 'bucket']));
+    }
+  }
+
+  // South-east: second open office and a storage room.
+  b.zone('오픈 오피스', c, c, h, h);
+  b.room(c, c, h, h, { w: [15, 38], n: [15, 38] });
+  b.deskRows(c + 2, c + 2, 34, h - 2, 0.6);
+  b.zone('창고방', 36, 30, h, h);
+  b.partitionX(36, 30, h, []);
+  b.partitionZ(30, 36, h, [43]);
+  b.edges(['smallBox', 'smallBox', 'locker', 'cabinet', 'bucket'], 36, 30, h, h, 0.6, 1.2, 0.85);
+}
+
+/**
+ * An outdoor yard: stacked shipping containers, a workshop shed, a fuel depot,
+ * a guard post by the south gate, a building site and a parking lot.
+ */
+function yard(b: Builder) {
+  const h = b.half;
+  b.zone('야적장', -h, -h, h, h);
+  // Containers in rows with lanes between them.
+  b.zone('컨테이너 구역', -44, -44, -8, -8);
+  for (let x = -40; x <= -12; x += 7) {
+    for (let z = -42; z <= -12; z += 8.5) {
+      if (b.chance(0.2)) continue;
+      const rot = b.chance(0.6);
+      const [w, d] = rot ? [2.4, 6] : [6, 2.4];
+      b.wall(x - w / 2, z - d / 2, x + w / 2, z + d / 2, b.chance(0.3) ? 5.2 : 2.6);
+    }
+  }
+  b.scatter(['barrier', 'tire', 'pallet', 'crate', 'cone'], -44, -44, -8, -8, 22);
+
+  // Workshop shed in the north-east.
+  b.zone('정비 창고', 22, -46, 46, -26);
+  b.room(22, -46, 46, -26, { w: [-36], s: [30, 40] }, 4);
+  b.edges(WORKSHOP, 22, -46, 46, -26, 0.6, 1.4, 0.75);
+  b.cluster(['generator', 'spool', 'toolbox', 'barrel'], 34, -36, 4, 7);
+
+  // Fuel depot in the west, fenced with barriers.
+  b.zone('연료 저장소', -46, 10, -22, 32);
+  b.line(['barrier'], -46, 10, -22, 10, 1.4, 0.85, 0);
+  b.line(['barrier'], -22, 10, -22, 32, 1.4, 0.85, 1);
+  for (let x = -42; x <= -26; x += 4) for (let z = 14; z <= 28; z += 4.5) b.cluster(FUEL, x, z, 1.2, 3);
+
+  // Guard post at the south gate.
+  b.zone('경비실', 12, 38, 22, 46);
+  b.room(12, 38, 22, 46, { w: [42] });
+  b.desk(17, 40, 0);
+  b.prop('cabinet', 21, 45);
+  b.prop('extinguisher', 13, 45.5);
+
+  // Building site south of the middle.
+  b.zone('공사 현장', -16, 14, 8, 36);
+  b.line(['sandbag'], -16, 14, 8, 14, 0.9, 0.8, 0);
+  b.scatter(BUILD_SITE, -15, 16, 7, 35, 40);
+
+  // Parking lot / loading area in the east.
+  b.zone('하역장', 22, -16, 46, 30);
+  for (let x = 25; x <= 43; x += 6) for (let z = -12; z <= 26; z += 7) b.cluster(['pallet', 'crate', 'crate', 'smallBox', 'sack'], x, z, 1.8, 3);
+  b.line(['block'], 20, -18, 20, 32, 2.5, 0.6, 1);
+
+  // Building materials stacked north of the middle.
+  b.zone('자재 적치장', -2, -46, 18, -20);
+  for (let x = 1; x <= 15; x += 4.5) for (let z = -43; z <= -23; z += 5) b.cluster(['spool', 'block', 'pallet', 'sack', 'sandbag'], x, z, 1.6, 3);
+  // Scrap tires along the west fence.
+  b.zone('폐타이어장', -h, -6, -30, 8);
+  b.scatter(['tire', 'tire', 'tire', 'barrel'], -h + 1, -5, -31, 7, 26);
+
+  // Loose clutter everywhere else.
+  b.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'bucket'], -h + 2, -h + 2, h - 2, h - 2, 60);
+  // Junk piles along the outer fence.
+  b.edges(['tire', 'pallet', 'barrel', 'block', 'crate', 'spool'], -h, -h, h, h, 0.8, 2.2, 0.45);
+}
+
+const LAYOUTS: Record<Exclude<Theme, 'hideout'>, (b: Builder) => void> = { warehouse, office, yard };
+
+/**
+ * A map for one of the themes: outer walls, the theme's areas with props that
+ * fit each area, exits in three corners and an open middle where hunters
+ * spawn. The same seed and theme always give the same map, so the server only
+ * sends those two.
  */
 export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   if (theme === 'hideout') return hideoutMap(seed);
@@ -140,56 +259,18 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
     { min: [half - 4, 0, half - 4], max: [half, 0.2, half] },
     { min: [-half, 0, half - 4], max: [-half + 4, 0.2, half] },
   ];
-  const walls: Box[] = [
+  const b = new Builder(rand, half);
+  b.walls.push(
     { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
     { min: [-half - t, 0, half], max: [half + t, wallHeight, half + t] },
     { min: [-half - t, 0, -half], max: [-half, wallHeight, half] },
     { min: [half, 0, -half], max: [half + t, wallHeight, half] },
-    ...interiorWalls(theme, rand, exits),
-  ];
+  );
+  for (const e of exits) b.keepClear(e.min[0] - 1, e.min[2] - 1, e.max[0] + 1, e.max[2] + 1);
+  b.keepClear(-CLEAR_ZONE, -CLEAR_ZONE, CLEAR_ZONE, CLEAR_ZONE);
+  LAYOUTS[theme](b);
+  const { walls, props, propBoxes, zones } = b;
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
-
-  const props: StaticProp[] = [];
-  const propBoxes: Box[] = [];
-  const types = PROP_TYPES.filter((k) => PROPS[k].themes.includes(theme));
-  const totalWeight = types.reduce((s, k) => s + PROPS[k].weight, 0);
-  const pickType = () => {
-    let r = rand() * totalWeight;
-    for (const k of types) {
-      r -= PROPS[k].weight;
-      if (r <= 0) return k;
-    }
-    return types[0];
-  };
-  const blocked = (b: Box) => {
-    const padded: Box = {
-      min: [b.min[0] - 0.15, b.min[1], b.min[2] - 0.15],
-      max: [b.max[0] + 0.15, b.max[1], b.max[2] + 0.15],
-    };
-    return [...walls, ...keepClear, ...propBoxes].some((w) => overlaps(padded, w));
-  };
-  const add = (type: string, pos: Vec3, rot: 0 | 1) => {
-    props.push({ id: props.length, type, pos, rot });
-    propBoxes.push(boxAt(pos, propSize(type, rot)));
-  };
-
-  let attempts = 0;
-  while (props.length < 320 && attempts < 12000) {
-    attempts++;
-    const type = pickType();
-    const rot = (rand() < 0.5 ? 0 : 1) as 0 | 1;
-    const pos: Vec3 = [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
-    if (Math.abs(pos[0]) < CLEAR_ZONE && Math.abs(pos[2]) < CLEAR_ZONE) continue;
-    const box = boxAt(pos, propSize(type, rot));
-    if (blocked(box)) continue;
-    add(type, pos, rot);
-    // Stack something on top of some crates and desks.
-    if ((type === 'crate' || type === 'desk') && rand() < 0.35) {
-      const top = type === 'desk' ? (rand() < 0.5 ? 'monitor' : 'smallBox') : rand() < 0.5 ? 'crate' : 'smallBox';
-      add(top, [pos[0], box.max[1], pos[2]], (rand() < 0.5 ? 0 : 1) as 0 | 1);
-    }
-  }
-
   const solids = [...walls, ...propBoxes];
 
   const hunterSpawns: Vec3[] = [];
@@ -198,8 +279,8 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
     hunterSpawns.push([Math.cos(a) * 2, 0, Math.sin(a) * 2]);
   }
   const propSpawns: Vec3[] = [];
-  attempts = 0;
-  while (propSpawns.length < 16 && attempts < 2000) {
+  let attempts = 0;
+  while (propSpawns.length < 16 && attempts < 4000) {
     attempts++;
     const pos: Vec3 = [(rand() * 2 - 1) * (half - 2), 0, (rand() * 2 - 1) * (half - 2)];
     if (Math.abs(pos[0]) < CLEAR_ZONE + 3 && Math.abs(pos[2]) < CLEAR_ZONE + 3) continue;
@@ -208,16 +289,16 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
 
   const lootSpots: Vec3[] = [];
-  for (const b of propBoxes) {
-    const top = b.max[1];
-    const center: Vec3 = [(b.min[0] + b.max[0]) / 2, top, (b.min[2] + b.max[2]) / 2];
-    if (top <= 1.2 && b.max[0] - b.min[0] >= 0.5 && !propBoxes.some((o) => o !== b && overlaps(boxAt(center, [0.3, 0.3, 0.3]), o))) {
+  for (const box of propBoxes) {
+    const top = box.max[1];
+    const center: Vec3 = [(box.min[0] + box.max[0]) / 2, top, (box.min[2] + box.max[2]) / 2];
+    if (top <= 1.2 && box.max[0] - box.min[0] >= 0.5 && !propBoxes.some((o) => o !== box && overlaps(boxAt(center, [0.3, 0.3, 0.3]), o))) {
       lootSpots.push(center);
     }
   }
   attempts = 0;
   let floorSpots = 0;
-  while (floorSpots < 100 && attempts < 6000) {
+  while (floorSpots < 150 && attempts < 8000) {
     attempts++;
     const pos: Vec3 = [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
     if (Math.abs(pos[0]) < CLEAR_ZONE && Math.abs(pos[2]) < CLEAR_ZONE) continue;
@@ -226,7 +307,19 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
     floorSpots++;
   }
 
-  return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots };
+  return { seed, theme, half, wallHeight, walls, props, propBoxes, solids, hunterSpawns, propSpawns, exits, lootSpots, zones };
+}
+
+/** The zone a point is in: the smallest one containing it, so rooms win over the area around them. */
+export function zoneAt(map: GameMap, x: number, z: number): Zone | null {
+  let best: Zone | null = null;
+  let bestArea = Infinity;
+  for (const zone of map.zones) {
+    if (x < zone.min[0] || x > zone.max[0] || z < zone.min[1] || z > zone.max[1]) continue;
+    const area = (zone.max[0] - zone.min[0]) * (zone.max[1] - zone.min[1]);
+    if (area < bestArea) [best, bestArea] = [zone, area];
+  }
+  return best;
 }
 
 /**
@@ -283,6 +376,7 @@ function hideoutMap(seed: number): GameMap {
     propSpawns: spawns,
     exits: [door],
     lootSpots: [],
+    zones: [{ name: '은신처', min: [-half, -half], max: [half, half] }],
     stations: { stash: [-5.1, 0, -7.4], bench: [5, 0, -7.4], door: [0, 0, half - 1] },
   };
 }
