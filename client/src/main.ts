@@ -18,7 +18,8 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   error.textContent = '';
   const name = nameInput.value.trim();
-  const room = roomInput.value.trim() || 'main';
+  // An empty room name means quick play: the server picks a room.
+  const room = roomInput.value.trim();
   try {
     localStorage.setItem('mechakov:name', name);
   } catch {
@@ -39,7 +40,7 @@ form.addEventListener('submit', async (e) => {
         // Without storage the profile only lasts for this visit.
       }
       form.classList.add('hidden');
-      new Game(net, msg.id, msg.seed, msg.profile).start();
+      new Game(net, msg.id, msg.seed, msg.theme, msg.profile).start();
     } else if (msg.t === 'error') {
       error.textContent = msg.message;
     }
@@ -52,3 +53,10 @@ form.addEventListener('submit', async (e) => {
   }
   net.send({ t: 'join', name, token });
 });
+
+fetch('/rooms')
+  .then((r) => r.json())
+  .then((d: { online: number }) => {
+    document.getElementById('online')!.textContent = `지금 ${d.online}명 플레이 중`;
+  })
+  .catch(() => {});

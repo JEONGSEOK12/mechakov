@@ -112,3 +112,22 @@ test('props can disguise only as a prop within reach', async () => {
   assert.equal(me.prop, target.type);
   a.ws.close();
 });
+
+test('quick play puts people in the same room', async () => {
+  const join = (name: string) => {
+    const ws = new WebSocket(`ws://localhost:${server.port}/ws`);
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', name })));
+    return new Promise<{ ws: WebSocket; room: string }>((resolve) => {
+      ws.on('message', (d) => {
+        const msg = JSON.parse(d.toString()) as ServerMsg;
+        if (msg.t === 'welcome') resolve({ ws, room: msg.room });
+      });
+    });
+  };
+  const a = await join('q1');
+  const b = await join('q2');
+  assert.match(a.room, /^quick-/);
+  assert.equal(a.room, b.room);
+  a.ws.close();
+  b.ws.close();
+});

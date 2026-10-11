@@ -1,3 +1,4 @@
+import type { Theme } from './props.ts';
 import type { Profile } from './upgrades.ts';
 import type { InputKeys, Phase, Role, Team, Vec3 } from './types.ts';
 
@@ -39,6 +40,7 @@ export type ClientMsg =
   | { t: 'join'; name: string; token?: string }
   | { t: 'pickup'; lootId: number }
   | { t: 'upgrade'; id: string }
+  | { t: 'addBot' }
   | { t: 'input'; seq: number; keys: InputKeys; yaw: number; pitch: number; face: number }
   | { t: 'shoot'; origin: Vec3; dir: Vec3 }
   | { t: 'disguise'; propId: number };
@@ -46,7 +48,8 @@ export type ClientMsg =
 export type ShotHit = 'player' | 'decoy' | 'world' | 'none';
 
 export type ServerMsg =
-  | { t: 'welcome'; id: number; seed: number; room: string; token: string; profile: Profile }
+  | { t: 'welcome'; id: number; seed: number; theme: Theme; room: string; token: string; profile: Profile }
+  | { t: 'map'; seed: number; theme: Theme }
   | { t: 'profile'; profile: Profile }
   | { t: 'loot'; items: Loot[] }
   | { t: 'bag'; items: string[]; capacity: number }

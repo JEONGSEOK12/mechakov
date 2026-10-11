@@ -1,16 +1,18 @@
 import {
-  DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, LOOT_PER_ROUND,
+  DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
-import { generateMap, type GameMap } from '../../shared/map.ts';
+import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
+import type { Theme } from '../../shared/props.ts';
 import { bodySize, stepBody, unstick, type BodyState } from '../../shared/physics.ts';
 import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg, ShotHit } from '../../shared/protocol.ts';
 import type { InputKeys, Phase, Role, Team, Vec3 } from '../../shared/types.ts';
 import {
   bagCapacity, canAfford, canDisguiseAs, maxHp, missPenalty, nextCost, speedMult, UPGRADES, type Profile,
 } from '../../shared/upgrades.ts';
+import { BotBrain, botName } from './bot.ts';
 import { ProfileStore } from './profiles.ts';
 
 export interface Conn {
@@ -38,6 +40,8 @@ export class Player {
   /** Set once the player's raid is decided; null while still in play. */
   outcome: Outcome | null = null;
   inRound = false;
+  /** Set for server-controlled test players. */
+  bot: BotBrain | null = null;
 
   constructor(readonly id: number, readonly token: string, readonly profile: Profile, readonly conn: Conn) {}
 
@@ -87,13 +91,15 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+const BOUNTY = ['scrap', 'bolts', 'wires'];
+
 function inBox(p: Vec3, b: { min: Vec3; max: Vec3 }) {
   return p[0] >= b.min[0] && p[0] <= b.max[0] && p[2] >= b.min[2] && p[2] <= b.max[2] && p[1] <= b.max[1] + 0.5;
 }
 
 export class Room {
   readonly players = new Map<number, Player>();
-  readonly map: GameMap;
+  map: GameMap;
   phase: Phase = 'lobby';
   time = 0;
   phaseEnds = 0;
@@ -107,8 +113,13 @@ export class Room {
     seed: number,
     readonly timings: Timings = DEFAULT_TIMINGS,
     readonly store = new ProfileStore(),
+    theme: Theme = 'warehouse',
   ) {
-    this.map = generateMap(seed);
+    this.map = generateMap(seed, theme);
+  }
+
+  get humans() {
+    return [...this.players.values()].filter((p) => !p.bot);
   }
 
   start() {
@@ -136,10 +147,30 @@ export class Room {
       p.alive = false;
       p.prop = null;
     }
-    this.send(p, { t: 'welcome', id, seed: this.map.seed, room: this.name, token, profile });
+    this.send(p, { t: 'welcome', id, seed: this.map.seed, theme: this.map.theme, room: this.name, token, profile });
     this.send(p, { t: 'loot', items: [...this.loot.values()] });
     this.sendBag(p);
     return p;
+  }
+
+  /** Adds a prop bot, for testing with fewer people. Only between rounds. */
+  addBot(): Player | null {
+    const bots = [...this.players.values()].filter((p) => p.bot).length;
+    if (this.full || bots >= MAX_BOTS || (this.phase !== 'lobby' && this.phase !== 'countdown')) return null;
+    const id = this.nextId++;
+    // Bots know every disguise so they blend in anywhere.
+    const profile: Profile = { name: botName(bots), stash: {}, upgrades: { catalog: 2 } };
+    const p = new Player(id, `bot-${id}`, profile, { send: () => {} });
+    p.bot = new BotBrain();
+    this.players.set(id, p);
+    this.resetForLobby(p);
+    return p;
+  }
+
+  /** Makes space for a person by dropping a bot. */
+  removeBot() {
+    const bot = [...this.players.values()].find((p) => p.bot);
+    if (bot) this.players.delete(bot.id);
   }
 
   removePlayer(id: number) {
@@ -165,6 +196,9 @@ export class Room {
       case 'upgrade':
         if (typeof msg.id === 'string') this.upgrade(p, msg.id);
         break;
+      case 'addBot':
+        this.addBot();
+        break;
     }
   }
 
@@ -174,6 +208,7 @@ export class Room {
 
     const frozenHunters = this.phase === 'hide';
     for (const p of this.players.values()) {
+      if (p.bot && p.alive) p.inputs.push(p.bot.next(this, p, TICK_DT));
       if (!p.alive) {
         const last = p.inputs.at(-1);
         if (last) p.seq = last.seq;
@@ -270,7 +305,8 @@ export class Room {
   private spawnLoot() {
     this.loot.clear();
     const total = ITEM_TYPES.reduce((s, k) => s + ITEMS[k].weight, 0);
-    for (const pos of shuffle(this.map.lootSpots).slice(0, LOOT_PER_ROUND)) {
+    const count = 8 + 3 * this.players.size;
+    for (const pos of shuffle(this.map.lootSpots).slice(0, count)) {
       let r = Math.random() * total;
       const type = ITEM_TYPES.find((k) => (r -= ITEMS[k].weight) <= 0) ?? ITEM_TYPES[0];
       const id = this.nextLootId++;
@@ -280,8 +316,9 @@ export class Room {
   }
 
   private startRound() {
-    const all = shuffle([...this.players.values()]);
-    const hunterCount = Math.max(1, Math.round(all.length / 4));
+    // Bots only play props, so hunters come from the people in the room.
+    const all = [...shuffle(this.humans), ...shuffle([...this.players.values()].filter((p) => p.bot))];
+    const hunterCount = Math.min(this.humans.length, Math.max(1, Math.round(all.length / 4)));
     const propSpawns = shuffle(this.map.propSpawns);
     all.forEach((p, i) => {
       p.alive = true;
@@ -341,6 +378,10 @@ export class Room {
   }
 
   private goToLobby() {
+    // A different map every round.
+    const next = THEMES[(THEMES.indexOf(this.map.theme) + 1) % THEMES.length];
+    this.map = generateMap(Math.floor(Math.random() * 1e9), next);
+    this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
     this.setPhase('lobby', 0);
     for (const p of this.players.values()) this.resetForLobby(p);
   }
@@ -436,8 +477,10 @@ export class Room {
     victim.alive = false;
     // The hunter takes what the prop was carrying, as far as their bag allows.
     if (killer) {
+      // Plus a small bounty so hunters build up their stash too.
+      const take = [...victim.bag, BOUNTY[Math.floor(Math.random() * BOUNTY.length)]];
       const room = bagCapacity(killer.profile) - killer.bag.length;
-      killer.bag.push(...victim.bag.slice(0, Math.max(0, room)));
+      killer.bag.push(...take.slice(0, Math.max(0, room)));
       this.sendBag(killer);
     }
     this.finishRaid(victim, 'died');

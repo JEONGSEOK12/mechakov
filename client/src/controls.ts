@@ -12,6 +12,7 @@ export class Controls {
   onDisguise: () => void = () => {};
   onPickup: () => void = () => {};
   onHideout: () => void = () => {};
+  onAddBot: () => void = () => {};
   onToggleRotationLock: () => void = () => {};
   onScoreboard: (show: boolean) => void = () => {};
 
@@ -50,6 +51,7 @@ export class Controls {
       case 'KeyR': if (down && !e.repeat) this.onToggleRotationLock(); break;
       case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
       case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
+      case 'KeyB': if (down && !e.repeat) this.onAddBot(); break;
       case 'Tab': this.onScoreboard(down); break;
       default: return;
     }

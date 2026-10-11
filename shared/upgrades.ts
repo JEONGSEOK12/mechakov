@@ -28,7 +28,7 @@ export const UPGRADES: Record<string, UpgradeDef> = {
   },
   catalog: {
     name: '변신 도감',
-    effects: ['작은 사물', '+ 나무 상자, 드럼통', '+ 사물함'],
+    effects: ['작은 사물', '+ 상자, 드럼통, 책상, 정수기', '+ 사물함, 서류함'],
     costs: [{ wires: 2, battery: 1 }, { circuit: 2, watch: 1 }],
   },
   scope: {

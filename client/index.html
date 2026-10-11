@@ -25,7 +25,7 @@
       <div id="help">
         WASD 이동 · Space 점프 · Shift 달리기<br />
         프롭: E 변신 · F 줍기 · R 방향 고정 &nbsp; 헌터: 클릭 사격<br />
-        초록 탈출구에 5초 서 있으면 탈출 · H 은신처 · Tab 점수판
+        초록 탈출구에 5초 서 있으면 탈출 · H 은신처 · B 봇 추가 · Tab 점수판
       </div>
       <div id="center-msg"></div>
       <div id="blind"><div id="blind-text"></div></div>
@@ -49,9 +49,10 @@
       <h1>MECHAKOV</h1>
       <p>사물로 숨거나, 숨은 사물을 찾아내세요.</p>
       <input id="name" maxlength="16" placeholder="닉네임" autocomplete="off" />
-      <input id="room" maxlength="32" placeholder="방 이름 (기본: main)" autocomplete="off" />
+      <input id="room" maxlength="32" placeholder="방 이름 (비우면 빠른 매칭)" autocomplete="off" />
       <button type="submit">입장</button>
       <div id="join-error"></div>
+      <div id="online"></div>
     </form>
 
     <script type="module" src="./src/main.ts"></script>

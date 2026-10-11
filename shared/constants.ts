@@ -41,5 +41,5 @@ export const FIRE_COOLDOWN = 0.4;
 export const SHOT_RANGE = 60;
 export const DISGUISE_RANGE = 4;
 
-export const LOOT_PER_ROUND = 24;
+export const MAX_BOTS = 6;
 export const PICKUP_RANGE = 2;
