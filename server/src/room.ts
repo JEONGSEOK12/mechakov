@@ -6,7 +6,7 @@ import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
 import type { Theme } from '../../shared/props.ts';
-import { bodySize, stepBody, unstick, type BodyState } from '../../shared/physics.ts';
+import { bodySize, newBody, stepBody, unstick, type BodyState } from '../../shared/physics.ts';
 import type { ClientMsg, Loot, Outcome, PlayerSnap, ServerMsg, ShotHit } from '../../shared/protocol.ts';
 import type { InputKeys, Phase, Role, Team, Vec3 } from '../../shared/types.ts';
 import {
@@ -25,7 +25,7 @@ export class Player {
   alive = true;
   extracted = false;
   hp = 100;
-  body: BodyState = { pos: [0, 0, 0], vy: 0, onGround: false };
+  body: BodyState = newBody([0, 0, 0]);
   prop: string | null = DEFAULT_PROP;
   yaw = 0;
   pitch = 0;
@@ -62,6 +62,8 @@ export class Player {
       pos: [...this.body.pos],
       vy: this.body.vy,
       onGround: this.body.onGround,
+      stamina: this.body.stamina,
+      winded: this.body.winded,
       yaw: this.yaw,
       pitch: this.pitch,
       face: this.face,
@@ -359,7 +361,7 @@ export class Room {
   }
 
   private spawn(p: Player, at: Vec3) {
-    p.body = { pos: [at[0] + (Math.random() - 0.5) * 0.5, at[1], at[2] + (Math.random() - 0.5) * 0.5], vy: 0, onGround: false };
+    p.body = newBody([at[0] + (Math.random() - 0.5) * 0.5, at[1], at[2] + (Math.random() - 0.5) * 0.5]);
     p.inputs.length = 0;
     unstick(p.body, bodySize(p.role, p.prop), this.map.solids);
   }
@@ -367,7 +369,7 @@ export class Room {
   private spawnLoot() {
     this.loot.clear();
     const total = ITEM_TYPES.reduce((s, k) => s + ITEMS[k].weight, 0);
-    const count = 8 + 3 * this.players.size;
+    const count = 16 + 4 * this.players.size;
     for (const pos of shuffle(this.map.lootSpots).slice(0, count)) {
       let r = Math.random() * total;
       const type = ITEM_TYPES.find((k) => (r -= ITEMS[k].weight) <= 0) ?? ITEM_TYPES[0];

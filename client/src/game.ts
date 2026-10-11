@@ -220,7 +220,7 @@ export class Game {
       return;
     }
     const before = this.body ? ([...this.body.pos] as Vec3) : null;
-    this.body = { pos: [...me.pos], vy: me.vy, onGround: me.onGround };
+    this.body = { pos: [...me.pos], vy: me.vy, onGround: me.onGround, stamina: me.stamina, winded: me.winded };
     this.pending = this.pending.filter((i) => i.seq > me.seq);
     const frozen = this.phase === 'hide' && me.role === 'hunter';
     for (const i of this.pending) {
@@ -444,6 +444,7 @@ export class Game {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart);
     this.hud.me(me, this.phase, !!this.map.stations);
+    this.hud.stamina(this.body ? this.body.stamina : null, !!this.body?.winded);
     this.hud.blind(this.phase === 'hide' && me?.role === 'hunter', left);
     this.hud.inventory(this.inventoryOpen, {
       bag: this.bag,

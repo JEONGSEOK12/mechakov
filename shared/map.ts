@@ -52,60 +52,63 @@ function mulberry32(seed: number) {
   };
 }
 
-const CLEAR_ZONE = 5;
+const CLEAR_ZONE = 6;
 
 export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
 export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처' };
 
-const HALF = 20;
+const HALF = 32;
+/** The interior layouts were drawn for a 40 m map; this stretches them to the current size. */
+const S = HALF / 20;
 
 /** Interior walls for each theme. They must leave the middle and the exit corners open. */
 function interiorWalls(theme: Theme, rand: () => number, exits: Box[]): Box[] {
   const walls: Box[] = [];
   if (theme === 'warehouse') {
     // Shelving rows on both sides of the middle aisle; the one by the office is shorter.
-    for (const x of [-15, -10, 10, 15]) {
+    for (const x of [-15, -12.5, -10, 10, 12.5, 15]) {
       for (const [z0, z1] of [[-17, -7], [7, 17]]) {
-        const [a, b] = x === 15 && z0 < 0 ? [-10, -3] : [z0, z1];
-        walls.push({ min: [x - 0.6, 0, a], max: [x + 0.6, 3.2, b] });
+        const [a, b] = x > 12 && z0 < 0 ? [-10, -3] : [z0, z1];
+        walls.push({ min: [x * S - 0.6, 0, a * S], max: [x * S + 0.6, 3.2, b * S] });
       }
     }
     // A small office in the far corner, with a doorway onto the aisle beside it.
-    walls.push({ min: [12, 0, -HALF], max: [12.3, 3, -17] });
-    walls.push({ min: [12, 0, -15], max: [12.3, 3, -12] });
-    walls.push({ min: [12, 0, -12.3], max: [HALF, 3, -12] });
+    walls.push({ min: [12 * S, 0, -HALF], max: [12 * S + 0.3, 3, -17 * S] });
+    walls.push({ min: [12 * S, 0, -15 * S], max: [12 * S + 0.3, 3, -12 * S] });
+    walls.push({ min: [12 * S, 0, -12 * S - 0.3], max: [HALF, 3, -12 * S] });
     // Low dividers along the middle aisle.
-    walls.push({ min: [-6, 0, -12], max: [-5.7, 1.2, -8] });
-    walls.push({ min: [5.7, 0, 8], max: [6, 1.2, 12] });
+    walls.push({ min: [-6 * S, 0, -12 * S], max: [-6 * S + 0.3, 1.2, -8 * S] });
+    walls.push({ min: [6 * S - 0.3, 0, 8 * S], max: [6 * S, 1.2, 12 * S] });
   } else if (theme === 'office') {
     // Four corner rooms around a cross-shaped hall, each with two doorways.
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const x = sx * 8;
-        const z = sz * 8;
+        const x = sx * 8 * S;
+        const z = sz * 8 * S;
         const span = (a: number, b: number) => [Math.min(a, b), Math.max(a, b)];
-        // Wall along x = ±8 with a door around z = ±14.
-        for (const [z0, z1] of [span(z, sz * 13), span(sz * 15, sz * HALF)]) {
+        // Wall along x = ±8 with a door around z = ±14 (in 40 m units).
+        for (const [z0, z1] of [span(z, sz * 13 * S), span(sz * 15 * S, sz * HALF)]) {
           walls.push({ min: [x - 0.15, 0, z0], max: [x + 0.15, 3, z1] });
         }
         // Wall along z = ±8 with a door around x = ±14.
-        for (const [x0, x1] of [span(x, sx * 13), span(sx * 15, sx * HALF)]) {
+        for (const [x0, x1] of [span(x, sx * 13 * S), span(sx * 15 * S, sx * HALF)]) {
           walls.push({ min: [x0, 0, z - 0.15], max: [x1, 3, z + 0.15] });
         }
       }
     }
     // Cubicle partitions in the arms of the hall.
     for (const s of [-1, 1]) {
-      for (const off of [-4, 4]) {
-        walls.push({ min: [off - 0.1, 0, Math.min(s * 10, s * 18)], max: [off + 0.1, 1.4, Math.max(s * 10, s * 18)] });
-        walls.push({ min: [Math.min(s * 10, s * 18), 0, off - 0.1], max: [Math.max(s * 10, s * 18), 1.4, off + 0.1] });
+      const [a, b] = [Math.min(s * 10 * S, s * 18 * S), Math.max(s * 10 * S, s * 18 * S)];
+      for (const off of [-4 * S, 0, 4 * S]) {
+        walls.push({ min: [off - 0.1, 0, a], max: [off + 0.1, 1.4, b] });
+        walls.push({ min: [a, 0, off - 0.1], max: [b, 1.4, off + 0.1] });
       }
     }
   } else {
     // Shipping containers dropped around the yard.
     const keepClear = exits.map((e): Box => ({ min: [e.min[0] - 1, 0, e.min[2] - 1], max: [e.max[0] + 1, 3, e.max[2] + 1] }));
     let attempts = 0;
-    while (walls.length < 9 && attempts < 500) {
+    while (walls.length < 22 && attempts < 1500) {
       attempts++;
       const rot = rand() < 0.5;
       const [w, d] = rot ? [6, 2.4] : [2.4, 6];
@@ -133,9 +136,9 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   const wallHeight = theme === 'yard' ? 4 : 6;
   const t = 0.5;
   const exits: Box[] = [
-    { min: [-half, 0, -half], max: [-half + 3, 0.2, -half + 3] },
-    { min: [half - 3, 0, half - 3], max: [half, 0.2, half] },
-    { min: [-half, 0, half - 3], max: [-half + 3, 0.2, half] },
+    { min: [-half, 0, -half], max: [-half + 4, 0.2, -half + 4] },
+    { min: [half - 4, 0, half - 4], max: [half, 0.2, half] },
+    { min: [-half, 0, half - 4], max: [-half + 4, 0.2, half] },
   ];
   const walls: Box[] = [
     { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
@@ -171,7 +174,7 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   };
 
   let attempts = 0;
-  while (props.length < 120 && attempts < 4000) {
+  while (props.length < 320 && attempts < 12000) {
     attempts++;
     const type = pickType();
     const rot = (rand() < 0.5 ? 0 : 1) as 0 | 1;
@@ -182,7 +185,7 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
     add(type, pos, rot);
     // Stack something on top of some crates and desks.
     if ((type === 'crate' || type === 'desk') && rand() < 0.35) {
-      const top = type === 'desk' ? 'smallBox' : rand() < 0.5 ? 'crate' : 'smallBox';
+      const top = type === 'desk' ? (rand() < 0.5 ? 'monitor' : 'smallBox') : rand() < 0.5 ? 'crate' : 'smallBox';
       add(top, [pos[0], box.max[1], pos[2]], (rand() < 0.5 ? 0 : 1) as 0 | 1);
     }
   }
@@ -214,7 +217,7 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   }
   attempts = 0;
   let floorSpots = 0;
-  while (floorSpots < 40 && attempts < 3000) {
+  while (floorSpots < 100 && attempts < 6000) {
     attempts++;
     const pos: Vec3 = [(rand() * 2 - 1) * (half - 1), 0, (rand() * 2 - 1) * (half - 1)];
     if (Math.abs(pos[0]) < CLEAR_ZONE && Math.abs(pos[2]) < CLEAR_ZONE) continue;

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { TICK_DT } from '../shared/constants.ts';
+import { SPRINT_SECONDS, TICK_DT, WINDED_UNTIL } from '../shared/constants.ts';
 import { generateMap, THEMES } from '../shared/map.ts';
 import { boxAt, overlaps } from '../shared/geometry.ts';
 import { PROPS } from '../shared/props.ts';
-import { stepBody, type BodyState } from '../shared/physics.ts';
+import { newBody, stepBody, type BodyState } from '../shared/physics.ts';
 import type { Box, InputKeys } from '../shared/types.ts';
 
 const idle: InputKeys = { f: false, b: false, l: false, r: false, jump: false, sprint: false };
@@ -16,7 +16,7 @@ test('the same seed gives the same map', () => {
 });
 
 test('bodies land on the floor and stay there', () => {
-  const b: BodyState = { pos: [0, 3, 0], vy: 0, onGround: false };
+  const b: BodyState = { pos: [0, 3, 0], vy: 0, onGround: false, stamina: 1, winded: false };
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, idle, 0, false, TICK_DT, []);
   assert.equal(b.pos[1], 0);
   assert.ok(b.onGround);
@@ -24,7 +24,7 @@ test('bodies land on the floor and stay there', () => {
 
 test('walls stop movement', () => {
   const wall: Box = { min: [-5, 0, -3], max: [5, 3, -2] };
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
   // yaw 0 faces -z, towards the wall.
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, forward, 0, false, TICK_DT, [wall]);
   assert.ok(Math.abs(b.pos[2] - (-2 + 0.3)) < 0.01, `stopped at ${b.pos[2]}`);
@@ -32,13 +32,13 @@ test('walls stop movement', () => {
 
 test('low ledges are stepped over, tall ones are not', () => {
   const ledge: Box = { min: [-5, 0, -3], max: [5, 0.2, -2] };
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
   for (let i = 0; i < 60; i++) stepBody(b, 'hunter', null, forward, 0, false, TICK_DT, [ledge]);
   assert.ok(b.pos[2] < -3, 'walked over the ledge');
 });
 
 test('frozen hunters cannot move or jump', () => {
-  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true };
+  const b: BodyState = { pos: [0, 0, 0], vy: 0, onGround: true, stamina: 1, winded: false };
   for (let i = 0; i < 30; i++) stepBody(b, 'hunter', null, { ...forward, jump: true }, 0, true, TICK_DT, []);
   assert.deepEqual(b.pos, [0, 0, 0]);
 });
@@ -111,4 +111,25 @@ test('the hideout has its stations in reach', () => {
     const near = station === 'door' ? map.exits : map.propBoxes;
     assert.ok(near.some((b) => Math.hypot(Math.max(b.min[0] - at[0], 0, at[0] - b.max[0]), Math.max(b.min[2] - at[2], 0, at[2] - b.max[2])) < 1.2), station);
   }
+});
+
+test('sprinting runs out of stamina, and you get your breath back before sprinting again', () => {
+  const sprint: InputKeys = { ...forward, sprint: true };
+  const speedOver = (keys: InputKeys, b: BodyState) => {
+    const z = b.pos[2];
+    stepBody(b, 'prop', 'smallBox', keys, 0, false, TICK_DT, []);
+    return (z - b.pos[2]) / TICK_DT;
+  };
+  const b = newBody([0, 0, 0]);
+  b.onGround = true;
+  const walk = speedOver(forward, newBody([0, 0, 0]));
+  assert.ok(speedOver(sprint, b) > walk * 1.5, 'sprinting is faster');
+  for (let i = 0; i < SPRINT_SECONDS / TICK_DT + 2; i++) speedOver(sprint, b);
+  assert.ok(b.winded, 'out of breath');
+  assert.ok(Math.abs(speedOver(sprint, b) - walk) < 1e-6, 'back to walking speed');
+  // Still winded until stamina refills past the threshold, even holding sprint.
+  for (let i = 0; i < 30; i++) speedOver(forward, b);
+  assert.ok(b.winded && b.stamina < WINDED_UNTIL);
+  for (let i = 0; i < 300 && b.winded; i++) speedOver(forward, b);
+  assert.ok(!b.winded && speedOver(sprint, b) > walk * 1.5, 'can sprint again');
 });
