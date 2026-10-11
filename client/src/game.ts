@@ -13,6 +13,7 @@ import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
+import { sfx, toggleMute } from './sfx.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
 
@@ -44,6 +45,8 @@ function lerpAngle(a: number, b: number, t: number) {
   return a + d * t;
 }
 
+const upgradeCount = (p: Profile) => Object.values(p.upgrades).reduce((a, b) => a + b, 0);
+
 const STATION_HINTS: Record<Station, string> = { stash: 'F: 보관함 열기', bench: 'F: 작업대에서 업그레이드', door: 'F: 레이드 출발' };
 
 export class Game {
@@ -69,6 +72,13 @@ export class Game {
   private body: BodyState | null = null;
   private prevPos: Vec3 = [0, 0, 0];
   private offset = new THREE.Vector3();
+  // Game feel: footstep stride, camera shake and sprint field of view.
+  private stride = 0;
+  private shakeUntil = 0;
+  private shakeAmount = 0;
+  private fov = 70;
+  private countdownBeep = 0;
+  private extractStep = 0;
   private pending: InputMsg[] = [];
   private seq = 0;
   private acc = 0;
@@ -102,6 +112,7 @@ export class Game {
     this.scene.add(this.worldRoot);
     this.map = generateMap(seed, theme);
     this.world = buildWorld(this.scene, this.worldRoot, this.map);
+    sfx.ambience(theme === 'yard');
     this.highlight.visible = false;
     this.scene.add(this.highlight);
 
@@ -125,11 +136,14 @@ export class Game {
     this.controls.onInventory = () => {
       this.inventoryOpen = !this.inventoryOpen;
     };
+    this.controls.onMute = () => this.hud.kill(toggleMute() ? '소리 끔 (M)' : '소리 켬 (M)');
     this.controls.onPickup = () => {
+      if (this.pickupTarget !== null && this.bag.length >= this.bagCapacity) sfx.bagFull();
       if (this.pickupTarget !== null) this.net.send({ t: 'pickup', lootId: this.pickupTarget });
       else if (this.station) this.useStation(this.station);
     };
     this.controls.onHideout = () => {
+      if (!this.hideout.open) sfx.open();
       this.hideout.toggle(!this.hideout.open, 'all');
       this.renderHideout();
     };
@@ -167,28 +181,45 @@ export class Game {
         break;
       case 'shot':
         this.addTracer(msg.origin, msg.end, msg.hit === 'player' ? 0xff5040 : 0xffe08a);
-        if (msg.from === this.myId && msg.hit === 'player') this.hud.hitmarker();
-        if (msg.target === this.myId || (msg.from === this.myId && msg.hit === 'decoy')) this.hud.damaged();
+        sfx.shot(this.camera.position.distanceTo(new THREE.Vector3(...msg.origin)));
+        if (msg.from === this.myId) this.shake(0.06, 120);
+        if (msg.from === this.myId && msg.hit === 'player') {
+          this.hud.hitmarker();
+          sfx.hitConfirm();
+        }
+        if (msg.target === this.myId || (msg.from === this.myId && msg.hit === 'decoy')) {
+          this.hud.damaged();
+          sfx.hurt();
+          this.shake(0.25, 300);
+        }
         break;
       case 'kill': {
         const name = (id: number | null) => (id === null ? null : this.roster.get(id)?.name ?? '???');
         const killer = name(msg.killer);
         this.hud.kill(killer ? `${killer} ▸ ${name(msg.victim)}` : `${name(msg.victim)} (가짜 사물을 너무 많이 쏨)`);
+        if (msg.killer === this.myId) sfx.kill();
         break;
       }
       case 'roundEnd':
         this.winner = msg.winner;
         break;
       case 'map':
+        if (this.map.theme === 'hideout' && msg.theme !== 'hideout') sfx.raidStart();
         this.map = generateMap(msg.seed, msg.theme);
         this.world = buildWorld(this.scene, this.worldRoot, this.map);
         this.faceLocked = false;
+        sfx.ambience(msg.theme === 'yard');
         break;
       case 'profile':
+        if (upgradeCount(msg.profile) > upgradeCount(this.profile)) sfx.upgrade();
         this.profile = msg.profile;
         this.renderHideout();
         break;
       case 'bag':
+        if (msg.items.length > this.bag.length && this.phase !== 'lobby') {
+          sfx.pickup();
+          this.hud.kill(`+ ${ITEMS[msg.items[msg.items.length - 1]].name}`);
+        }
         this.bag = msg.items;
         this.bagCapacity = msg.capacity;
         break;
@@ -197,12 +228,15 @@ export class Game {
         break;
       case 'result':
         this.result = { outcome: msg.outcome, items: msg.items };
+        if (msg.outcome === 'extracted' || msg.outcome === 'survived') sfx.extracted();
+        else sfx.failed();
         break;
     }
   }
 
   private onSnap(msg: Extract<ServerMsg, { t: 'snap' }>) {
     const prevMe = this.me;
+    this.phaseSounds(this.phase, msg.phase);
     // The last raid's result stays up (and in the lobby) until the next one starts.
     if (msg.phase === 'countdown' && this.phase !== 'countdown') this.result = null;
     this.phase = msg.phase;
@@ -214,6 +248,10 @@ export class Game {
     while (this.snaps.length > 30) this.snaps.shift();
 
     const me = this.me;
+    if (me && prevMe && me.alive && me.role === 'prop' && prevMe.role === 'prop' && me.prop !== prevMe.prop && msg.phase !== 'lobby') sfx.disguise();
+    const step = me?.alive ? Math.floor((me.extracting ?? 0) * 5) : 0;
+    if (step > this.extractStep) sfx.extractTick(step);
+    this.extractStep = step;
     if (!me || !me.alive || me.role === 'spectator') {
       this.body = null;
       this.pending = [];
@@ -257,8 +295,39 @@ export class Game {
     const me = this.me;
     if (!this.body || !me) return;
     this.prevPos = [...this.body.pos];
+    const was = { onGround: this.body.onGround, vy: this.body.vy, winded: this.body.winded };
     stepBody(this.body, me.role, me.prop, keys, yaw, this.phase === 'hide' && me.role === 'hunter', TICK_DT, this.map.solids, me.speed);
     this.pending.push(input);
+    this.movementSounds(was, keys.sprint);
+  }
+
+  /** Footsteps, jumps and landings from our own predicted movement. */
+  private movementSounds(was: { onGround: boolean; vy: number; winded: boolean }, sprintKey: boolean) {
+    const b = this.body!;
+    if (b.winded && !was.winded) sfx.winded();
+    if (was.onGround && !b.onGround && b.vy > 0) sfx.jump();
+    if (!was.onGround && b.onGround && was.vy < -6) {
+      sfx.land();
+      this.shake(0.08, 120);
+    }
+    const moved = Math.hypot(b.pos[0] - this.prevPos[0], b.pos[2] - this.prevPos[2]);
+    if (!b.onGround || moved < 1e-3) return;
+    const sprinting = sprintKey && !b.winded && b.stamina > 0;
+    this.stride += moved;
+    if (this.stride > (sprinting ? 1.9 : 1.5)) {
+      this.stride = 0;
+      sfx.footstep(sprinting);
+    }
+  }
+
+  private phaseSounds(from: Phase, to: Phase) {
+    if (from === 'countdown' && to === 'hide') sfx.countdown(true);
+    if (from === 'hide' && to === 'hunt') sfx.huntStart();
+  }
+
+  private shake(amount: number, ms: number) {
+    this.shakeAmount = Math.max(this.shakeAmount, amount);
+    this.shakeUntil = Math.max(this.shakeUntil, performance.now() + ms);
   }
 
   private shoot() {
@@ -415,6 +484,24 @@ export class Game {
     const camDist = hit ? Math.max(0.3, hit.distance - 0.2) : len;
     this.camera.position.copy(pivot).addScaledVector(back.normalize(), camDist);
     this.camera.lookAt(this.camera.position.clone().add(fwd));
+
+    // A little shake on hits and landings, and a wider view while sprinting.
+    const now = performance.now();
+    if (now < this.shakeUntil) {
+      const a = this.shakeAmount * ((this.shakeUntil - now) / 300);
+      this.camera.position.add(new THREE.Vector3((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a));
+    } else {
+      this.shakeAmount = 0;
+    }
+    const b = this.body;
+    const moving = this.controls.keys.f || this.controls.keys.b || this.controls.keys.l || this.controls.keys.r;
+    const sprinting = !!b && moving && this.controls.keys.sprint && !b.winded && b.stamina > 0;
+    const targetFov = sprinting ? 77 : 70;
+    if (Math.abs(this.fov - targetFov) > 0.05) {
+      this.fov += (targetFov - this.fov) * 0.12;
+      this.camera.fov = this.fov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   private updateDisguiseTarget(me: PlayerSnap | undefined, myPos: THREE.Vector3 | null) {
@@ -455,6 +542,9 @@ export class Game {
       myId: this.myId,
     });
 
+    const beep = this.phase === 'countdown' && left > 0 ? Math.ceil(left) : 0;
+    if (beep && beep <= 3 && beep !== this.countdownBeep) sfx.countdown(false);
+    this.countdownBeep = beep;
     if (this.phase === 'end') this.hud.roundEnd(this.winner);
     else if (this.phase === 'countdown') this.hud.center(`라운드 시작까지 ${Math.ceil(left)}`);
     else if (this.phase === 'hide' && me?.role === 'prop' && me.alive) {
@@ -533,6 +623,7 @@ export class Game {
       this.net.send({ t: 'start' });
       return;
     }
+    sfx.open();
     this.hideout.toggle(true, station);
     this.renderHideout();
   }
