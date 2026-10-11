@@ -13,7 +13,6 @@ import {
   bagCapacity, canAfford, canDisguiseAs, maxHp, missPenalty, nextCost, speedMult, UPGRADES, type Profile,
 } from '../../shared/upgrades.ts';
 import { BotBrain, botName } from './bot.ts';
-import { ProfileStore } from './profiles.ts';
 
 export interface Conn {
   send(data: string): void;
@@ -118,7 +117,7 @@ export class Room {
     readonly name: string,
     seed: number,
     readonly timings: Timings = DEFAULT_TIMINGS,
-    readonly store = new ProfileStore(),
+    readonly store: { save(): void } = { save() {} },
     theme: Theme = 'warehouse',
   ) {
     this.map = generateMap(seed, theme);

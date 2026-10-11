@@ -12,7 +12,7 @@ import { Controls } from './controls.ts';
 import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
 import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
-import type { Net } from './net.ts';
+import type { Connection } from './net.ts';
 
 type InputMsg = Extract<ClientMsg, { t: 'input' }>;
 
@@ -94,7 +94,7 @@ export class Game {
 
   private worldRoot = new THREE.Group();
 
-  constructor(private net: Net, private myId: number, seed: number, theme: Theme, private profile: Profile) {
+  constructor(private net: Connection, private myId: number, seed: number, theme: Theme, private profile: Profile) {
     this.scene.add(this.worldRoot);
     this.map = generateMap(seed, theme);
     this.world = buildWorld(this.scene, this.worldRoot, this.map);
@@ -462,7 +462,8 @@ export class Game {
     if (this.phase === 'lobby' || this.phase === 'countdown') hints.push('B: 프롭 봇 추가');
     let hint = hints.join(' · ');
     if (me?.role === 'prop' && me.alive && this.faceLocked) hint += `${hint ? ' · ' : ''}방향 고정됨 (R)`;
-    if (!this.controls.locked && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';
+    if (!this.controls.active && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';
+    else if (this.controls.dragMode && !this.hideout.open && !hint) hint = '드래그해서 둘러보고, 짧게 클릭하면 사격해요';
     this.hud.hint(hint);
   }
 

@@ -49,8 +49,11 @@
       <h1>MECHAKOV</h1>
       <p>사물로 숨거나, 숨은 사물을 찾아내세요.</p>
       <input id="name" maxlength="16" placeholder="닉네임" autocomplete="off" />
-      <input id="room" maxlength="32" placeholder="방 이름 (비우면 빠른 매칭)" autocomplete="off" />
-      <button type="submit">입장</button>
+      <div id="online-join" class="join-group">
+        <input id="room" maxlength="32" placeholder="방 이름 (비우면 빠른 매칭)" autocomplete="off" />
+        <button type="submit">온라인 입장</button>
+      </div>
+      <button id="solo" type="button" class="secondary">혼자 하기 (봇 상대, 헌터)</button>
       <div id="join-error"></div>
       <div id="online"></div>
     </form>
