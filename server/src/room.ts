@@ -227,6 +227,9 @@ export class Room {
       case 'pickup':
         if (isNum(msg.lootId)) this.pickup(p, msg.lootId);
         break;
+      case 'drop':
+        if (isNum(msg.index)) this.drop(p, msg.index);
+        break;
       case 'upgrade':
         if (typeof msg.id === 'string') this.upgrade(p, msg.id);
         break;
@@ -505,6 +508,17 @@ export class Room {
     if (d > PICKUP_RANGE + Math.max(...size) / 2) return;
     this.loot.delete(lootId);
     p.bag.push(item.type);
+    this.sendBag(p);
+    this.broadcast({ t: 'loot', items: [...this.loot.values()] });
+  }
+
+  /** Puts one bag item back on the floor at the player's feet, for anyone to pick up. */
+  private drop(p: Player, index: number) {
+    if (!p.alive || p.outcome || (this.phase !== 'hide' && this.phase !== 'hunt')) return;
+    if (!Number.isInteger(index) || index < 0 || index >= p.bag.length) return;
+    const [type] = p.bag.splice(index, 1);
+    const id = this.nextLootId++;
+    this.loot.set(id, { id, type, pos: [p.body.pos[0], p.body.pos[1], p.body.pos[2]] });
     this.sendBag(p);
     this.broadcast({ t: 'loot', items: [...this.loot.values()] });
   }

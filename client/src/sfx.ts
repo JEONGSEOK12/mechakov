@@ -120,6 +120,10 @@ export const sfx = {
     tone(660, 0.08, { type: 'triangle', volume: 0.25 });
     tone(990, 0.12, { type: 'triangle', delay: 0.07, volume: 0.25 });
   },
+  drop() {
+    tone(700, 0.08, { type: 'triangle', volume: 0.2 });
+    tone(420, 0.12, { type: 'triangle', delay: 0.06, volume: 0.2 });
+  },
   bagFull() {
     tone(220, 0.15, { type: 'square', volume: 0.08 });
   },

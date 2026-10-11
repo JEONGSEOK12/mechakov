@@ -279,3 +279,19 @@ test('props can fight each other with rockets, and a dead prop drops its loot', 
   room.handle(me, { t: 'pickup', lootId: gpu.id });
   assert.deepEqual(me.bag, ['gpu']);
 });
+
+test('props can drop bag items on the floor and pick them up again', () => {
+  const { room, prop } = setup();
+  const item = grabLoot(room, prop);
+  const before = room.loot.size;
+  room.handle(prop, { t: 'drop', index: 5 });
+  assert.deepEqual(prop.bag, [item.type], 'a slot that is empty does nothing');
+  room.handle(prop, { t: 'drop', index: 0 });
+  assert.deepEqual(prop.bag, []);
+  assert.equal(room.loot.size, before + 1);
+  const dropped = [...room.loot.values()].at(-1)!;
+  assert.equal(dropped.type, item.type);
+  assert.ok(Math.hypot(dropped.pos[0] - prop.body.pos[0], dropped.pos[2] - prop.body.pos[2]) < 0.01, 'at their feet');
+  room.handle(prop, { t: 'pickup', lootId: dropped.id });
+  assert.deepEqual(prop.bag, [item.type]);
+});

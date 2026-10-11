@@ -52,6 +52,8 @@ export type Outcome = 'extracted' | 'survived' | 'died' | 'mia';
 export type ClientMsg =
   | { t: 'join'; name: string; token?: string }
   | { t: 'pickup'; lootId: number }
+  /** Drops the bag item at `index` on the floor. */
+  | { t: 'drop'; index: number }
   | { t: 'upgrade'; id: string }
   | { t: 'addBot' }
   | { t: 'start' }
