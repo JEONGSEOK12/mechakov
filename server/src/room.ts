@@ -114,6 +114,12 @@ export class Room {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** Off for solo practice: everyone is a prop and the round is just loot and extract. */
   hunters = true;
+  /**
+   * Off for solo: the room waits in the lobby until the person presses start,
+   * and the round ends as soon as every person's raid is decided.
+   */
+  autoStart = true;
+  private startRequested = false;
 
   constructor(
     readonly name: string,
@@ -154,7 +160,7 @@ export class Room {
       p.alive = false;
       p.prop = null;
     }
-    this.send(p, { t: 'welcome', id, seed: this.map.seed, theme: this.map.theme, room: this.name, token, profile });
+    this.send(p, { t: 'welcome', id, seed: this.map.seed, theme: this.map.theme, room: this.name, token, profile, manualStart: !this.autoStart });
     this.send(p, { t: 'loot', items: [...this.loot.values()] });
     this.sendBag(p);
     return p;
@@ -205,6 +211,9 @@ export class Room {
         break;
       case 'addBot':
         this.addBot();
+        break;
+      case 'start':
+        if (this.phase === 'lobby') this.startRequested = true;
         break;
     }
   }
@@ -298,7 +307,10 @@ export class Room {
     const expired = this.time >= this.phaseEnds;
     switch (this.phase) {
       case 'lobby':
-        if (count >= MIN_PLAYERS) this.setPhase('countdown', this.timings.countdown);
+        if (count >= MIN_PLAYERS && (this.autoStart || this.startRequested)) {
+          this.startRequested = false;
+          this.setPhase('countdown', this.timings.countdown);
+        }
         break;
       case 'countdown':
         if (count < MIN_PLAYERS) this.setPhase('lobby', 0);
@@ -309,6 +321,8 @@ export class Room {
         const living = (role: Role) => [...this.players.values()].filter((p) => p.role === role && p.alive).length;
         if (living('prop') === 0) this.endRound('noProps');
         else if (this.hunters && living('hunter') === 0) this.endRound('noHunters');
+        // Nobody to wait for once the people are out; bots still in the raid go missing.
+        else if (!this.autoStart && this.humans.every((p) => p.outcome)) this.endRound('time');
         else if (expired && this.phase === 'hide') this.setPhase('hunt', this.timings.hunt);
         else if (expired) this.endRound('time');
         break;

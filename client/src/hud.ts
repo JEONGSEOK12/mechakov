@@ -22,8 +22,9 @@ export class Hud {
     $('hud').classList.remove('hidden');
   }
 
-  phase(phase: Phase, timeLeft: number, mapName: string) {
-    $('phase-label').textContent = `${mapName} · ${PHASE_LABEL[phase]}`;
+  phase(phase: Phase, timeLeft: number, mapName: string, manualStart = false) {
+    const label = phase === 'lobby' && manualStart ? '다음 레이드 준비' : PHASE_LABEL[phase];
+    $('phase-label').textContent = `${mapName} · ${label}`;
     $('phase-timer').textContent = phase === 'lobby' ? '' : clock(timeLeft);
   }
 
@@ -79,13 +80,7 @@ export class Hud {
       el.textContent = '';
       return;
     }
-    const list = items.length ? items.map((i) => ITEMS[i].name).join(', ') : '없음';
-    el.textContent = {
-      extracted: `탈출 성공! 보관함으로: ${list}`,
-      survived: `생존! 보관함으로: ${list}`,
-      died: items.length ? `사망: 잃은 아이템 ${list}` : '사망',
-      mia: items.length ? `탈출 실패: 잃은 아이템 ${list}` : '탈출 실패',
-    }[outcome];
+    el.textContent = resultText(outcome, items);
   }
 
   hint(text: string) {
@@ -169,6 +164,16 @@ interface InventoryView {
   players: RosterEntry[];
   visible: Map<number, PlayerSnap>;
   myId: number;
+}
+
+export function resultText(outcome: Outcome, items: string[]) {
+  const list = items.length ? items.map((i) => ITEMS[i].name).join(', ') : '없음';
+  return {
+    extracted: `탈출 성공! 보관함으로: ${list}`,
+    survived: `생존! 보관함으로: ${list}`,
+    died: items.length ? `사망: 잃은 아이템 ${list}` : '사망',
+    mia: items.length ? `탈출 실패: 잃은 아이템 ${list}` : '탈출 실패',
+  }[outcome];
 }
 
 function escape(s: string) {

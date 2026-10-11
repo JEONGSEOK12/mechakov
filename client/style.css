@@ -89,6 +89,12 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
   color: #eee; cursor: pointer; }
 #hideout button.buy { background: #e8692a; border: none; font-weight: 700; }
 #hideout button:disabled { opacity: 0.4; cursor: default; }
+#lobby-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px;
+  padding: 12px 14px; background: #1c1f24; border-radius: 8px; }
+#lobby-bar.hidden { display: none; }
+#last-raid { margin: 0; color: #cfd6dd; font-size: 14px; min-width: 0; }
+#last-raid:empty::before { content: '아이템을 챙겨 초록 탈출구로 나오면 이 창고에 쌓여요.'; color: #9aa; }
+#hideout #raid-start { background: #4cd964; color: #0c1a10; border: none; font-weight: 800; padding: 10px 22px; font-size: 16px; }
 #stash { display: flex; flex-wrap: wrap; gap: 8px; }
 .stash-item { padding: 6px 10px; background: #1c1f24; border-radius: 6px; font-size: 14px; }
 .stash-item i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }

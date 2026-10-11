@@ -3,13 +3,20 @@ import { canAfford, level, nextCost, UPGRADES, UPGRADE_IDS, type Profile } from 
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/** The between-raids screen: what's in the stash and what it can buy. */
+/**
+ * The between-raids screen: what's in the stash and what it can buy. In solo it
+ * is also the lobby, held open between raids with a button to start the next.
+ */
 export class Hideout {
   open = false;
+  /** Shown as the lobby: can't be closed, only left by starting a raid. */
+  lobby = false;
   onUpgrade: (id: string) => void = () => {};
+  onStart: () => void = () => {};
 
   constructor() {
     $('hideout-close').addEventListener('click', () => this.toggle(false));
+    $('raid-start').addEventListener('click', () => this.onStart());
     $('upgrades').addEventListener('click', (e) => {
       const id = (e.target as HTMLElement).dataset.upgrade;
       if (id) this.onUpgrade(id);
@@ -17,9 +24,21 @@ export class Hideout {
   }
 
   toggle(open = !this.open) {
+    if (this.lobby) open = true;
     this.open = open;
     $('hideout').classList.toggle('hidden', !open);
     if (open) document.exitPointerLock();
+  }
+
+  /** Switch between the lobby and the plain hideout panel. */
+  setLobby(lobby: boolean, lastRaid = '') {
+    if (lobby === this.lobby) return;
+    this.lobby = lobby;
+    $('hideout-title').textContent = lobby ? '대기실' : '은신처';
+    $('hideout-close').classList.toggle('hidden', lobby);
+    $('lobby-bar').classList.toggle('hidden', !lobby);
+    $('last-raid').textContent = lastRaid;
+    this.toggle(lobby);
   }
 
   render(profile: Profile, canUpgradeNow: boolean) {
