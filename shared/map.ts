@@ -1,9 +1,9 @@
 import type { Theme } from './props.ts';
 import { boxAt, overlaps } from './geometry.ts';
-import { Builder, propSize, type StaticProp, type Zone } from './layouts.ts';
+import { Builder, propSize, type Rot, type StaticProp, type Zone } from './layouts.ts';
 import type { Box, Vec3 } from './types.ts';
 
-export { propSize, type StaticProp, type Zone } from './layouts.ts';
+export { propSize, type Rot, type StaticProp, type Zone } from './layouts.ts';
 
 export interface GameMap {
   seed: number;
@@ -53,15 +53,15 @@ export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office:
 const HALF = 50;
 
 // Prop groups by what kind of place they belong in.
-const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket'];
-const DOCK = ['pallet', 'forkPallet', 'crate', 'crate', 'smallBox', 'sack'];
-const WORKSHOP = ['toolbox', 'gasCan', 'spool', 'barrel', 'bucket', 'tire', 'extinguisher'];
-const OFFICE_WALL = ['cabinet', 'bookshelf', 'plant', 'cooler', 'printer', 'locker'];
-const LOUNGE = ['sofa', 'plant', 'cooler', 'trashCan', 'floorLamp', 'chair'];
-const SERVER = ['locker', 'cabinet', 'smallBox', 'smallBox', 'monitor'];
-const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp'];
+const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket', 'paintCan', 'smallBox'];
+const DOCK = ['pallet', 'forkPallet', 'crate', 'crate', 'smallBox', 'sack', 'handTruck'];
+const WORKSHOP = ['toolbox', 'gasCan', 'spool', 'barrel', 'bucket', 'tire', 'extinguisher', 'paintCan', 'cabinet', 'handTruck'];
+const OFFICE_WALL = ['cabinet', 'bookshelf', 'plant', 'cooler', 'printer', 'locker', 'whiteboard', 'bookshelf', 'cabinet'];
+const LOUNGE = ['sofa', 'plant', 'cooler', 'trashCan', 'floorLamp', 'vending', 'sofa'];
+const SERVER = ['serverRack', 'serverRack', 'serverRack', 'cabinet'];
+const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp', 'vending'];
 const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher'];
-const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier'];
+const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier', 'wheelbarrow', 'pipes', 'paintCan'];
 
 /**
  * A big warehouse: shelving aisles in the main hall, a walled office block in
@@ -78,44 +78,66 @@ function warehouse(b: Builder) {
   b.partitionZ(-37.5, 35, h, [42.5]);
   b.zone('사무실', 20, -h, 35, -25);
   b.deskRows(21, -48.5, 34, -33);
-  b.edges(OFFICE_WALL, 20, -h, 35, -25, 0.6, 2.2, 0.5);
+  b.edges(OFFICE_WALL, 20, -h, 35, -25, 0.6, 1.6, 0.6);
+  b.prop('whiteboard', 31, -33.2, 0);
   b.zone('관리자실', 35, -h, h, -37.5);
   b.desk(42.5, -45, 0);
-  b.line(['bookshelf', 'cabinet', 'plant'], 36.5, -49.4, 48.5, -49.4, 1.6, 0.8, 0);
-  b.prop('sofa', 42.5, -39.3);
+  b.line(['bookshelf', 'cabinet', 'plant'], 36.5, -49.4, 48.5, -49.4, 1.2, 0.9, 0);
+  b.prop('sofa', 42.5, -38.9, 2);
+  b.prop('coffeeTable', 42.5, -40.6);
+  b.prop('plant', 36.3, -38.4);
+  b.prop('floorLamp', 48.6, -38.4);
+  b.line(['cabinet', 'archiveBox', 'cabinet'], 49.4, -47, 49.4, -42, 1, 0.8, 3);
   b.zone('휴게실', 35, -37.5, h, -25);
-  b.line(LOUNGE, 36.5, -26.2, 48.5, -26.2, 1.9, 0.9, 0);
-  b.scatter(['chair', 'trashCan', 'plant', 'cooler'], 37, -35, 48, -29, 6);
+  b.line(LOUNGE, 36.5, -26.1, 48.5, -26.1, 1.9, 0.9, 2);
+  for (const x of [39, 45]) {
+    const t = b.prop('desk', x, -32);
+    if (!t) continue;
+    b.prop('chair', x - 0.3, -32.8, 0);
+    b.prop('chair', x + 0.3, -31.2, 2);
+    b.onTop(t, b.pick(['microwave', 'plant', 'smallBox']));
+  }
+  b.line(['vending', 'cooler', 'trashCan'], 36.1, -36, 36.1, -28, 1.6, 0.8, 1);
 
   // Workshop on the west wall.
   b.zone('정비실', -h, -24, -32, -6);
   b.room(-h, -24, -32, -6, { e: [-15], s: [-41] });
-  b.edges(WORKSHOP, -h, -24, -32, -6, 0.6, 1.4, 0.75);
-  b.cluster(['toolbox', 'spool', 'gasCan', 'generator'], -41, -15, 3, 5);
+  b.edges(WORKSHOP, -h, -24, -32, -6, 0.6, 1.1, 0.85);
+  // Workbenches with tools on them, and a car-sized clear spot in the middle.
+  for (const x of [-46, -42, -38]) {
+    const bench = b.prop('desk', x, -21.5, 0);
+    b.onTop(bench, b.pick(['toolbox', 'toolbox', 'gasCan', 'paintCan']));
+  }
+  b.cluster(['toolbox', 'spool', 'gasCan', 'generator', 'tire', 'tire'], -41, -13, 3.5, 8);
 
   // Loading dock along the south wall, between the exits.
   b.zone('하역장', -h, 34, h, h);
   for (const x of [-22, -10, 10, 22]) b.wall(x - 1.2, 41, x + 1.2, 49, 2.6);
-  for (let x = -40; x <= 40; x += 4) {
+  for (let x = -40; x <= 40; x += 3) {
     if (Math.abs(x) < 8) continue;
-    b.line(DOCK, x, 36, x, 39.5, 1.6, 0.7, 0);
+    b.line(DOCK, x, 36, x, 39.5, 1.4, 0.8, 0);
   }
   b.line(['cone'], -6, 37, 6, 37, 1.5, 1);
+  // Freight waiting in each loading bay.
+  for (const x of [-34, -16, 0, 16, 34]) b.cluster(['forkPallet', 'pallet', 'crate', 'handTruck', 'smallBox'], x, 45, 2.2, 5);
 
   // Shelving aisles in the main hall, leaving the middle cross open.
   for (const x of [-27, -22, -17, -12, 12, 17]) {
     for (const [z0, z1] of [[-46, -28], [-22, -9], [9, 30]]) {
       if (x < -30 && z0 === -22) continue;
       b.wall(x - 0.6, z0, x + 0.6, z1, 3.2);
-      b.line(STORAGE, x - 1.4, z0 + 0.8, x - 1.4, z1 - 0.8, 1.5, 0.55);
-      b.line(STORAGE, x + 1.4, z0 + 0.8, x + 1.4, z1 - 0.8, 1.5, 0.55);
+      b.line(STORAGE, x - 1.3, z0 + 0.8, x - 1.3, z1 - 0.8, 1.2, 0.7);
+      b.line(STORAGE, x + 1.3, z0 + 0.8, x + 1.3, z1 - 0.8, 1.2, 0.7);
     }
   }
   // East side of the hall: pallet stacks and barrels in blocks.
   for (let x = 24; x <= 44; x += 5) {
-    for (let z = -16; z <= 28; z += 6) b.cluster(['pallet', 'crate', 'barrel', 'forkPallet'], x, z, 1.6, 3);
+    for (let z = -16; z <= 28; z += 6) b.cluster(['pallet', 'crate', 'barrel', 'forkPallet', 'crate', 'sack'], x, z, 1.8, 5);
   }
-  b.scatter(['cone', 'bucket', 'extinguisher', 'tire'], -h + 2, -h + 2, h - 2, 33, 18);
+  // Along the outer walls of the hall: drums, pipe stacks and parked carts.
+  b.line(['barrel', 'barrel', 'pipes', 'dumpster', 'handTruck', 'crate'], -h + 1, -h + 1.2, 18, -h + 1.2, 2.6, 0.6, 0);
+  b.line(['barrel', 'crate', 'pallet', 'spool', 'wheelbarrow'], -h + 1, 0, -h + 1, 32, 2, 0.6, 1);
+  b.scatter(['cone', 'bucket', 'extinguisher', 'tire', 'paintCan', 'smallBox', 'handTruck'], -h + 2, -h + 2, h - 2, 33, 40);
 }
 
 /**
@@ -128,17 +150,21 @@ function office(b: Builder) {
   const c = 3.5;
   b.zone('복도', -c, -h, c, h);
   b.zone('복도', -h, -c, h, c);
-  b.line(CORRIDOR, -c + 0.6, -h + 6, -c + 0.6, -10, 5, 0.7, 1);
-  b.line(CORRIDOR, c - 0.6, 10, c - 0.6, h - 6, 5, 0.7, 1);
-  b.line(CORRIDOR, 10, -c + 0.6, h - 6, -c + 0.6, 5, 0.7, 0);
-  b.line(CORRIDOR, -h + 6, c - 0.6, -10, c - 0.6, 5, 0.7, 0);
+  b.line(CORRIDOR, -c + 0.6, -h + 6, -c + 0.6, -10, 3.5, 0.8, 1);
+  b.line(CORRIDOR, c - 0.6, -h + 6, c - 0.6, -10, 3.5, 0.6, 3);
+  b.line(CORRIDOR, c - 0.6, 10, c - 0.6, h - 6, 3.5, 0.8, 3);
+  b.line(CORRIDOR, -c + 0.6, 10, -c + 0.6, h - 6, 3.5, 0.6, 1);
+  b.line(CORRIDOR, 10, -c + 0.6, h - 6, -c + 0.6, 3.5, 0.8, 0);
+  b.line(CORRIDOR, 10, c - 0.6, h - 6, c - 0.6, 3.5, 0.6, 2);
+  b.line(CORRIDOR, -h + 6, c - 0.6, -10, c - 0.6, 3.5, 0.8, 2);
+  b.line(CORRIDOR, -h + 6, -c + 0.6, -10, -c + 0.6, 3.5, 0.6, 0);
 
   // North-west: open office with cubicle partitions.
   b.zone('오픈 오피스', -h, -h, -c, -c);
   b.room(-h, -h, -c, -c, { e: [-40, -15], s: [-38, -15] });
   for (const z of [-42, -32, -22, -12]) b.wall(-44, z - 0.08, -10, z + 0.08, 1.4);
-  b.deskRows(-46, -47, -9, -6, 0.6);
-  b.edges(OFFICE_WALL, -h, -h, -c, -c, 0.6, 3, 0.4);
+  b.deskRows(-46, -47, -9, -6, 0.7);
+  b.edges(OFFICE_WALL, -h, -h, -c, -c, 0.6, 1.8, 0.55);
 
   // North-east: four rooms.
   b.room(c, -h, h, -c, { w: [-38, -15], s: [15, 38] });
@@ -146,37 +172,50 @@ function office(b: Builder) {
   b.partitionZ(-27, c, h, [15, 38]);
   b.zone('회의실', c, -h, 27, -27);
   b.meetingTable(15, -38.5, 12);
-  b.edges(['plant', 'cooler', 'floorLamp'], c, -h, 27, -27, 0.6, 4, 0.5);
+  b.prop('whiteboard', 15, -48.9, 0);
+  b.edges(['plant', 'cooler', 'floorLamp', 'cabinet'], c, -h, 27, -27, 0.6, 3, 0.55);
   b.zone('서버실', 27, -h, h, -27);
-  for (let x = 30; x <= 47; x += 3) b.line(SERVER, x, -47, x, -31, 1.1, 0.8, 1);
+  for (let x = 30; x <= 47; x += 3) b.line(SERVER, x, -47, x, -31, 1.1, 0.85, 1);
+  b.line(['smallBox', 'archiveBox', 'cabinet', 'extinguisher'], 28, -28.2, 49, -28.2, 1.2, 0.6, 2);
   b.zone('임원실', c, -27, 27, -c);
   b.desk(15, -18, 0);
   b.desk(9, -10, 1);
-  b.line(['bookshelf', 'cabinet', 'plant'], c + 1, -26.3, 26, -26.3, 1.8, 0.7, 0);
-  b.prop('sofa', 21, -8);
+  b.line(['bookshelf', 'cabinet', 'plant', 'bookshelf'], c + 1, -26.3, 26, -26.3, 1.2, 0.85, 0);
+  b.prop('sofa', 21, -4.6, 2);
+  b.prop('coffeeTable', 21, -6.4);
+  b.prop('sofa', 24.6, -8, 3);
+  b.prop('floorLamp', 26.2, -4.6);
+  b.prop('plant', c + 0.6, -4.4);
   b.zone('복사실', 27, -27, h, -c);
-  b.edges(['copier', 'printer', 'cabinet', 'trashCan'], 27, -27, h, -c, 0.8, 2, 0.8);
+  b.edges(['copier', 'printer', 'cabinet', 'trashCan', 'archiveBox', 'copier'], 27, -27, h, -c, 0.8, 1.4, 0.85);
+  b.cluster(['archiveBox', 'archiveBox', 'smallBox', 'handTruck'], 38.5, -15, 3, 8);
 
   // South-west: lounge and cafeteria.
   b.zone('라운지', -h, c, -c, h);
   b.room(-h, c, -c, h, { e: [15, 38], n: [-15, -38] });
-  b.edges(LOUNGE, -h, c, -c, h, 0.7, 2.2, 0.6);
+  b.edges(LOUNGE, -h, c, -c, h, 0.7, 1.9, 0.75);
   for (let x = -40; x <= -12; x += 7) {
     for (let z = 14; z <= 40; z += 7) {
       const t = b.prop('desk', x, z);
-      if (t) for (const [dx, dz] of [[0, -0.8], [0, 0.8]]) b.prop('chair', x + dx, z + dz);
-      if (t && b.chance(0.4)) b.onTop(t, b.pick(['smallBox', 'bucket']));
+      if (t) {
+        b.prop('chair', x - 0.3, z - 0.8, 0);
+        b.prop('chair', x + 0.3, z + 0.8, 2);
+        if (b.chance(0.4)) b.prop('chair', x + 0.4, z - 0.8, 0);
+      }
+      if (t && b.chance(0.5)) b.onTop(t, b.pick(['smallBox', 'microwave', 'plant', 'trashCan']));
     }
   }
 
   // South-east: second open office and a storage room.
   b.zone('오픈 오피스', c, c, h, h);
   b.room(c, c, h, h, { w: [15, 38], n: [15, 38] });
-  b.deskRows(c + 2, c + 2, 34, h - 2, 0.6);
+  b.deskRows(c + 2, c + 2, 34, h - 2, 0.7);
+  b.line(OFFICE_WALL, c + 2, h - 0.6, 34, h - 0.6, 1.6, 0.6, 2);
   b.zone('창고방', 36, 30, h, h);
   b.partitionX(36, 30, h, []);
   b.partitionZ(30, 36, h, [43]);
-  b.edges(['smallBox', 'smallBox', 'locker', 'cabinet', 'bucket'], 36, 30, h, h, 0.6, 1.2, 0.85);
+  b.edges(['smallBox', 'smallBox', 'locker', 'cabinet', 'bucket', 'archiveBox', 'paintCan'], 36, 30, h, h, 0.6, 1, 0.9);
+  b.cluster(['smallBox', 'archiveBox', 'handTruck', 'crate'], 43, 40, 2.5, 7);
 }
 
 /**
@@ -196,48 +235,51 @@ function yard(b: Builder) {
       b.wall(x - w / 2, z - d / 2, x + w / 2, z + d / 2, b.chance(0.3) ? 5.2 : 2.6);
     }
   }
-  b.scatter(['barrier', 'tire', 'pallet', 'crate', 'cone'], -44, -44, -8, -8, 22);
+  b.scatter(['barrier', 'tire', 'pallet', 'crate', 'cone', 'forkPallet', 'pipes', 'barrel'], -44, -44, -8, -8, 45);
 
   // Workshop shed in the north-east.
   b.zone('정비 창고', 22, -46, 46, -26);
   b.room(22, -46, 46, -26, { w: [-36], s: [30, 40] }, 4);
-  b.edges(WORKSHOP, 22, -46, 46, -26, 0.6, 1.4, 0.75);
-  b.cluster(['generator', 'spool', 'toolbox', 'barrel'], 34, -36, 4, 7);
+  b.edges(WORKSHOP, 22, -46, 46, -26, 0.6, 1.1, 0.85);
+  b.cluster(['generator', 'spool', 'toolbox', 'barrel', 'tire', 'handTruck'], 34, -36, 4.5, 12);
 
   // Fuel depot in the west, fenced with barriers.
   b.zone('연료 저장소', -46, 10, -22, 32);
   b.line(['barrier'], -46, 10, -22, 10, 1.4, 0.85, 0);
   b.line(['barrier'], -22, 10, -22, 32, 1.4, 0.85, 1);
-  for (let x = -42; x <= -26; x += 4) for (let z = 14; z <= 28; z += 4.5) b.cluster(FUEL, x, z, 1.2, 3);
+  for (let x = -42; x <= -26; x += 4) for (let z = 14; z <= 28; z += 4.5) b.cluster(FUEL, x, z, 1.4, 5);
 
   // Guard post at the south gate.
   b.zone('경비실', 12, 38, 22, 46);
   b.room(12, 38, 22, 46, { w: [42] });
   b.desk(17, 40, 0);
-  b.prop('cabinet', 21, 45);
+  b.prop('cabinet', 21, 45, 3);
+  b.prop('locker', 21.4, 43.5, 3);
   b.prop('extinguisher', 13, 45.5);
+  b.prop('cooler', 13, 39);
+  b.prop('trashCan', 18.5, 45.4);
 
   // Building site south of the middle.
   b.zone('공사 현장', -16, 14, 8, 36);
   b.line(['sandbag'], -16, 14, 8, 14, 0.9, 0.8, 0);
-  b.scatter(BUILD_SITE, -15, 16, 7, 35, 40);
+  b.scatter(BUILD_SITE, -15, 16, 7, 35, 70);
 
   // Parking lot / loading area in the east.
   b.zone('하역장', 22, -16, 46, 30);
-  for (let x = 25; x <= 43; x += 6) for (let z = -12; z <= 26; z += 7) b.cluster(['pallet', 'crate', 'crate', 'smallBox', 'sack'], x, z, 1.8, 3);
+  for (let x = 25; x <= 43; x += 6) for (let z = -12; z <= 26; z += 7) b.cluster(['pallet', 'crate', 'crate', 'smallBox', 'sack', 'forkPallet'], x, z, 2, 5);
   b.line(['block'], 20, -18, 20, 32, 2.5, 0.6, 1);
 
   // Building materials stacked north of the middle.
   b.zone('자재 적치장', -2, -46, 18, -20);
-  for (let x = 1; x <= 15; x += 4.5) for (let z = -43; z <= -23; z += 5) b.cluster(['spool', 'block', 'pallet', 'sack', 'sandbag'], x, z, 1.6, 3);
+  for (let x = 1; x <= 15; x += 4.5) for (let z = -43; z <= -23; z += 5) b.cluster(['spool', 'block', 'pallet', 'sack', 'sandbag', 'pipes'], x, z, 1.8, 5);
   // Scrap tires along the west fence.
   b.zone('폐타이어장', -h, -6, -30, 8);
-  b.scatter(['tire', 'tire', 'tire', 'barrel'], -h + 1, -5, -31, 7, 26);
+  b.scatter(['tire', 'tire', 'tire', 'barrel'], -h + 1, -5, -31, 7, 45);
 
   // Loose clutter everywhere else.
-  b.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'bucket'], -h + 2, -h + 2, h - 2, h - 2, 60);
-  // Junk piles along the outer fence.
-  b.edges(['tire', 'pallet', 'barrel', 'block', 'crate', 'spool'], -h, -h, h, h, 0.8, 2.2, 0.45);
+  b.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'bucket', 'wheelbarrow', 'sandbag'], -h + 2, -h + 2, h - 2, h - 2, 110);
+  // Junk piles along the outer fence, with dumpsters here and there.
+  b.edges(['tire', 'pallet', 'barrel', 'block', 'crate', 'spool', 'dumpster'], -h, -h, h, h, 0.8, 1.8, 0.6);
 }
 
 const LAYOUTS: Record<Exclude<Theme, 'hideout'>, (b: Builder) => void> = { warehouse, office, yard };
@@ -338,7 +380,7 @@ function hideoutMap(seed: number): GameMap {
   ];
   const props: StaticProp[] = [];
   const propBoxes: Box[] = [];
-  const add = (type: string, pos: Vec3, rot: 0 | 1 = 0) => {
+  const add = (type: string, pos: Vec3, rot: Rot = 0) => {
     props.push({ id: props.length, type, pos, rot });
     propBoxes.push(boxAt(pos, propSize(type, rot)));
   };
@@ -360,6 +402,9 @@ function hideoutMap(seed: number): GameMap {
   add('tire', [7.8, 0, 4.5]);
   add('plant', [-8.3, 0, -2]);
   add('cooler', [8.4, 0, -4]);
+  add('vending', [8.4, 0, -1.5], 3);
+  add('coffeeTable', [-7.6, 0, 1.5], 1);
+  add('chair', [-6.7, 0, 1.2], 3);
 
   const door: Box = { min: [-1.5, 0, half - 2], max: [1.5, 0.2, half] };
   const spawns: Vec3[] = [[0, 0, 0], [1.5, 0, 0.5], [-1.5, 0, 0.5], [0, 0, 1.5], [1.5, 0, 2], [-1.5, 0, 2]];
