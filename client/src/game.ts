@@ -584,7 +584,7 @@ export class Game {
     this.hud.inventory(this.inventoryOpen, {
       bag: this.bag,
       capacity: this.bagCapacity,
-      stash: this.profile.stash,
+      stash: this.map.stations ? this.profile.stash : null,
       players: [...this.roster.values()],
       visible: this.latest,
       myId: this.myId,
