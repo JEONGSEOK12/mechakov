@@ -141,3 +141,21 @@ test('bots play props: they hide as a prop, and the person is the hunter', () =>
   const hidden = bots.filter((b) => b.bot!.isHidden);
   assert.equal(hidden.length, 3, `${hidden.length} of 3 bots hidden`);
 });
+
+test('with hunters off, the person is a prop and can loot and extract right away', () => {
+  const room = new Room('practice', 7, timings);
+  room.hunters = false;
+  const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  room.addBot();
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  assert.equal(room.phase, 'hide');
+  assert.ok([...room.players.values()].every((p) => p.role === 'prop'));
+
+  const item = grabLoot(room, human);
+  const exit = room.map.exits[0];
+  human.body.pos = [(exit.min[0] + exit.max[0]) / 2, 0, (exit.min[2] + exit.max[2]) / 2];
+  room.phaseEnds = room.time + 20;
+  for (let i = 0; i < 1 / TICK_DT && !human.extracted; i++) room.tick();
+  assert.ok(human.extracted, 'extracted during the hiding phase');
+  assert.equal(human.profile.stash[item.type], 1);
+});

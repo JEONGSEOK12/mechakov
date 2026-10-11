@@ -6,7 +6,7 @@ import { Room, type Player } from '../../server/src/room.ts';
 import type { Connection } from './net.ts';
 
 const PROFILE_KEY = 'mechakov:solo-profile';
-const SOLO_BOTS = 4;
+const SOLO_BOTS = 3;
 
 function loadProfile(name: string): Profile {
   try {
@@ -19,8 +19,9 @@ function loadProfile(name: string): Profile {
 }
 
 /**
- * Solo play with no server: the same game room runs in this tab, with bots as
- * the props and you as the hunter. Progress is kept in this browser.
+ * Solo play with no server: the same game room runs in this tab. For now there
+ * are no hunters: you and the bots are props looting and extracting. Progress
+ * is kept in this browser.
  */
 export class LocalNet implements Connection {
   onMessage: (msg: ServerMsg) => void = () => {};
@@ -32,6 +33,7 @@ export class LocalNet implements Connection {
   constructor() {
     const theme = THEMES[Math.floor(Math.random() * THEMES.length)];
     this.room = new Room('solo', Math.floor(Math.random() * 1e9), DEFAULT_TIMINGS, { save: () => this.saveProfile() }, theme);
+    this.room.hunters = false;
     this.room.start();
   }
 
