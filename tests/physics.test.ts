@@ -43,6 +43,38 @@ test('frozen hunters cannot move or jump', () => {
   assert.deepEqual(b.pos, [0, 0, 0]);
 });
 
+/** Flood fill over a 0.5 m grid of spots a hunter-sized body can stand on the floor. */
+function reachable(map: ReturnType<typeof generateMap>) {
+  const step = 0.5;
+  const n = Math.ceil((map.half * 2) / step);
+  const blockers = [...map.walls, ...map.propBoxes.filter((b) => b.max[1] > 1.2)];
+  const free = (i: number, j: number) => {
+    const x = -map.half + (i + 0.5) * step;
+    const z = -map.half + (j + 0.5) * step;
+    return !blockers.some((b) => overlaps(boxAt([x, 0, z], [0.6, 1.8, 0.6]), b));
+  };
+  const seen = new Uint8Array(n * n);
+  const start = Math.floor(n / 2);
+  const queue = [[start, start]];
+  seen[start * n + start] = 1;
+  while (queue.length) {
+    const [i, j] = queue.pop()!;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const a = i + di;
+      const b = j + dj;
+      if (a < 0 || b < 0 || a >= n || b >= n || seen[a * n + b] || !free(a, b)) continue;
+      seen[a * n + b] = 1;
+      queue.push([a, b]);
+    }
+  }
+  return (x: number, z: number) => {
+    const i = Math.floor((x + map.half) / step);
+    const j = Math.floor((z + map.half) / step);
+    // Allow the nearest cells, since a spawn point can sit between grid cells.
+    return [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([di, dj]) => seen[(i + di) * n + (j + dj)]);
+  };
+}
+
 for (const theme of THEMES) {
   test(`${theme} maps are playable`, () => {
     for (const seed of [1, 2, 3, 99, 12345]) {
@@ -54,6 +86,11 @@ for (const theme of THEMES) {
       for (const e of map.exits) {
         const zone = { min: e.min, max: [e.max[0], 2, e.max[2]] as [number, number, number] };
         assert.ok(!map.solids.some((s) => overlaps(zone, s)), `${theme}/${seed}: exit blocked`);
+      }
+      // Every spawn and exit can be walked to from the middle (props up to jump height can be climbed).
+      const reach = reachable(map);
+      for (const p of [...map.propSpawns, ...map.exits.map((e) => [(e.min[0] + e.max[0]) / 2, 0, (e.min[2] + e.max[2]) / 2])]) {
+        assert.ok(reach(p[0], p[2]), `${theme}/${seed}: (${p[0].toFixed(1)}, ${p[2].toFixed(1)}) is cut off`);
       }
       for (const s of map.hunterSpawns) {
         assert.ok(!map.solids.some((b) => overlaps(boxAt(s, [0.6, 1.8, 0.6]), b)));

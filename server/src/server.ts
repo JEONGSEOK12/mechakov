@@ -6,7 +6,7 @@ import { DEFAULT_TIMINGS, type Timings } from '../../shared/constants.ts';
 import { THEMES } from '../../shared/map.ts';
 import type { ClientMsg } from '../../shared/protocol.ts';
 import { ProfileStore } from './profiles.ts';
-import { Room, type Player } from './room.ts';
+import { cleanName, Room, type Player } from './room.ts';
 
 export interface ServerOptions {
   port: number;
@@ -17,6 +17,10 @@ export interface ServerOptions {
   /** JSON file for player profiles; in memory when omitted. */
   profilesFile?: string;
 }
+
+const MAX_CONNECTIONS_PER_IP = 6;
+const MSG_PER_SECOND = 60;
+const MSG_BURST = 120;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -77,14 +81,47 @@ export function startServer(opts: ServerOptions) {
     return open[0]?.name ?? `quick-${++quickCount}`;
   };
 
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: 4096 });
+  const perIp = new Map<string, number>();
   wss.on('connection', (ws, req) => {
+    // Behind a proxy the real address is in a header; Fly.io sets Fly-Client-IP.
+    const forwarded = req.headers['fly-client-ip'] ?? req.headers['x-forwarded-for'];
+    const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(',')[0].trim() || req.socket.remoteAddress || '?';
+    if ((perIp.get(ip) ?? 0) >= MAX_CONNECTIONS_PER_IP) {
+      ws.close(1008, 'too many connections');
+      return;
+    }
+    perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
+    // Oversized or malformed frames surface here; without a handler they would crash the server.
+    ws.on('error', () => ws.terminate());
+    ws.on('close', () => {
+      const n = (perIp.get(ip) ?? 1) - 1;
+      if (n <= 0) perIp.delete(ip);
+      else perIp.set(ip, n);
+    });
+
+    // Clients send about 30 inputs a second; allow bursts, drop the rest, and
+    // disconnect anything flooding far beyond that.
+    let budget = MSG_BURST;
+    let dropped = 0;
+    const refill = setInterval(() => {
+      budget = Math.min(MSG_BURST, budget + MSG_PER_SECOND);
+      if (dropped > MSG_PER_SECOND * 3) ws.close(1008, 'flooding');
+      dropped = 0;
+    }, 1000);
+    ws.on('close', () => clearInterval(refill));
+
     const url = new URL(req.url ?? '/ws', 'http://localhost');
     const requested = (url.searchParams.get('room') ?? '').trim().slice(0, 32);
     let player: Player | null = null;
     let room: Room | null = null;
 
     ws.on('message', (raw) => {
+      if (budget <= 0) {
+        dropped++;
+        return;
+      }
+      budget--;
       let msg: ClientMsg;
       try {
         msg = JSON.parse(raw.toString());
@@ -107,7 +144,7 @@ export function startServer(opts: ServerOptions) {
           ws.close();
           return;
         }
-        const { token, profile } = store.get(msg.token, typeof msg.name === 'string' ? msg.name.trim().slice(0, 16) : '');
+        const { token, profile } = store.get(msg.token, cleanName(msg.name));
         if (online.has(token)) {
           ws.send(JSON.stringify({ t: 'error', message: '이 계정은 이미 다른 창에서 접속 중이에요.' }));
           ws.close();

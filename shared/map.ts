@@ -58,13 +58,17 @@ const HALF = 20;
 function interiorWalls(theme: Theme, rand: () => number, exits: Box[]): Box[] {
   const walls: Box[] = [];
   if (theme === 'warehouse') {
-    // Shelving rows on both sides of the middle aisle.
+    // Shelving rows on both sides of the middle aisle; the one by the office is shorter.
     for (const x of [-15, -10, 10, 15]) {
-      for (const [z0, z1] of [[-17, -7], [7, 17]]) walls.push({ min: [x - 0.6, 0, z0], max: [x + 0.6, 3.2, z1] });
+      for (const [z0, z1] of [[-17, -7], [7, 17]]) {
+        const [a, b] = x === 15 && z0 < 0 ? [-10, -3] : [z0, z1];
+        walls.push({ min: [x - 0.6, 0, a], max: [x + 0.6, 3.2, b] });
+      }
     }
-    // A small office in the far corner, with a doorway facing the middle.
-    walls.push({ min: [11, 0, -HALF], max: [11.3, 3, -13.5] });
-    walls.push({ min: [11, 0, -10.5], max: [HALF, 3, -10.2] });
+    // A small office in the far corner, with a doorway onto the aisle beside it.
+    walls.push({ min: [12, 0, -HALF], max: [12.3, 3, -17] });
+    walls.push({ min: [12, 0, -15], max: [12.3, 3, -12] });
+    walls.push({ min: [12, 0, -12.3], max: [HALF, 3, -12] });
     // Low dividers along the middle aisle.
     walls.push({ min: [-6, 0, -12], max: [-5.7, 1.2, -8] });
     walls.push({ min: [5.7, 0, 8], max: [6, 1.2, 12] });

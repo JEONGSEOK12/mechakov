@@ -93,6 +93,12 @@ function shuffle<T>(arr: T[]): T[] {
 
 const BOUNTY = ['scrap', 'bolts', 'wires'];
 
+/** Trims a display name and drops control and invisible characters. */
+export function cleanName(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/[\p{C}\u200B-\u200F\u2060-\u206F]/gu, '').trim().slice(0, 16);
+}
+
 function inBox(p: Vec3, b: { min: Vec3; max: Vec3 }) {
   return p[0] >= b.min[0] && p[0] <= b.max[0] && p[2] >= b.min[2] && p[2] <= b.max[2] && p[1] <= b.max[1] + 0.5;
 }
@@ -137,7 +143,7 @@ export class Room {
 
   addPlayer(conn: Conn, rawName: unknown, token: string, profile: Profile): Player {
     const id = this.nextId++;
-    profile.name = (typeof rawName === 'string' ? rawName.trim().slice(0, 16) : '') || profile.name || `Player ${id}`;
+    profile.name = cleanName(rawName) || profile.name || `Player ${id}`;
     const p = new Player(id, token, profile, conn);
     this.players.set(id, p);
     if (this.phase === 'lobby' || this.phase === 'countdown') {
@@ -230,13 +236,45 @@ export class Room {
       this.updateExtraction(p);
     }
 
-    this.broadcast({
-      t: 'snap',
-      time: this.time,
-      phase: this.phase,
-      timeLeft: Math.max(0, this.phaseEnds - this.time),
-      players: [...this.players.values()].map((p) => p.snap(this.timings.extract)),
-    });
+    this.sendSnapshots();
+  }
+
+  /**
+   * Hunters only receive props they could actually see, so a modified client
+   * can't show hiding players through walls. Everyone else gets everything.
+   */
+  private sendSnapshots() {
+    const all = [...this.players.values()];
+    const snaps = new Map(all.map((p) => [p.id, p.snap(this.timings.extract)]));
+    const roster = all.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
+    const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster };
+    const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
+    for (const viewer of all) {
+      if (viewer.role !== 'hunter' || !viewer.alive || (this.phase !== 'hide' && this.phase !== 'hunt')) {
+        viewer.conn.send(everything);
+        continue;
+      }
+      const visible = all.filter((p) => p.role !== 'prop' || !p.alive || (this.phase === 'hunt' && this.canSee(viewer, p)));
+      viewer.conn.send(JSON.stringify({ ...base, players: visible.map((p) => snaps.get(p.id)!) }));
+    }
+  }
+
+  /** Line of sight from a hunter's eye to a player's center, blocked only by walls. */
+  canSee(viewer: Player, target: Player): boolean {
+    const eye: Vec3 = [viewer.body.pos[0], viewer.body.pos[1] + HUNTER_EYE, viewer.body.pos[2]];
+    const size = bodySize(target.role, target.prop);
+    // Check the top and middle so something peeking over a low wall still shows.
+    for (const h of [size[1] / 2, size[1] * 0.95]) {
+      const to: Vec3 = [target.body.pos[0], target.body.pos[1] + h, target.body.pos[2]];
+      const d = Math.hypot(to[0] - eye[0], to[1] - eye[1], to[2] - eye[2]);
+      if (d < 3) return true;
+      const dir: Vec3 = [(to[0] - eye[0]) / d, (to[1] - eye[1]) / d, (to[2] - eye[2]) / d];
+      if (!this.map.walls.some((w) => {
+        const t = rayBox(eye, dir, w);
+        return t !== null && t < d;
+      })) return true;
+    }
+    return false;
   }
 
   private updateExtraction(p: Player) {
