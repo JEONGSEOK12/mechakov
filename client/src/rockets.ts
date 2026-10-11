@@ -100,16 +100,18 @@ export class RocketFx {
 
   /** A fireball, a flash of light and a burst of smoke. */
   boom(at: Vec3) {
+    // Sized from the blast radius so what you see matches who gets thrown.
+    const k = ROCKET_RADIUS / 3.2;
     const pos = new THREE.Vector3(...at);
     const fire = new THREE.Mesh(this.blastGeo, new THREE.MeshBasicMaterial({ color: 0xffa030, transparent: true, opacity: 0.9, depthWrite: false }));
     fire.position.copy(pos);
     fire.scale.setScalar(0.4);
-    this.fade(fire, 280, ROCKET_RADIUS * 2);
+    this.fade(fire, 280, ROCKET_RADIUS * 1.2);
     const core = new THREE.Mesh(this.blastGeo, new THREE.MeshBasicMaterial({ color: 0xfff1b0, transparent: true, opacity: 1, depthWrite: false }));
     core.position.copy(pos);
     core.scale.setScalar(0.3);
-    this.fade(core, 160, ROCKET_RADIUS);
-    for (let i = 0; i < 10; i++) this.puff(pos, i % 3 ? 0x5a5a5a : 0x2e2e2e, 1.6 + Math.random() * 1.5, 700 + Math.random() * 500, 2.4);
+    this.fade(core, 160, ROCKET_RADIUS * 0.6);
+    for (let i = 0; i < 10; i++) this.puff(pos, i % 3 ? 0x5a5a5a : 0x2e2e2e, (1.6 + Math.random() * 1.5) * k, 700 + Math.random() * 500, 2.4 * k);
     this.flash.position.copy(pos);
     this.flashAt = performance.now();
   }

@@ -138,7 +138,7 @@ export class Hud {
     this.flash('damage-flash');
   }
 
-  /** The Tab panel: what you carry this raid, what's banked, and who's in the round. */
+  /** The Tab panel: what you carry this raid, what's banked (in the hideout only), and who's in the round. */
   inventory(show: boolean, inv: InventoryView) {
     const el = $('inventory');
     el.classList.toggle('hidden', !show);
@@ -153,7 +153,7 @@ export class Hud {
     const bagSlots = Array.from({ length: Math.max(capacity, bag.length) }, (_, i) =>
       bag[i] ? item(bag[i]) : '<div class="slot empty"></div>').join('');
     const bagValue = bag.reduce((s, t) => s + ITEMS[t].value, 0);
-    const stashed = Object.entries(stash).filter(([, n]) => n > 0).sort(([a], [b]) => ITEMS[b].value - ITEMS[a].value);
+    const stashed = Object.entries(stash ?? {}).filter(([, n]) => n > 0).sort(([a], [b]) => ITEMS[b].value - ITEMS[a].value);
     const stashValue = stashed.reduce((s, [t, n]) => s + ITEMS[t].value * n, 0);
 
     // Only your own HP: other players' numbers would hint at who is in view.
@@ -166,8 +166,8 @@ export class Hud {
     el.innerHTML =
       `<div class="inv-col"><h3>가방 <small>${bag.length}/${capacity} · 가치 ${bagValue}</small></h3>` +
       `<div class="slots">${bagSlots}</div>` +
-      `<h3>보관함 <small>가치 ${stashValue}</small></h3>` +
-      (stashed.length ? `<div class="slots">${stashed.map(([t, n]) => item(t, n)).join('')}</div>` : '<p class="muted">아직 없어요. 아이템을 챙겨 탈출하세요.</p>') +
+      (!stash ? '' : `<h3>보관함 <small>가치 ${stashValue}</small></h3>` +
+        (stashed.length ? `<div class="slots">${stashed.map(([t, n]) => item(t, n)).join('')}</div>` : '<p class="muted">아직 없어요. 아이템을 챙겨 탈출하세요.</p>')) +
       `</div><div class="inv-col players">` +
       section('헌터', players.filter((p) => p.role === 'hunter')) +
       section('프롭', players.filter((p) => p.role === 'prop')) +
@@ -179,7 +179,8 @@ export class Hud {
 interface InventoryView {
   bag: string[];
   capacity: number;
-  stash: Record<string, number>;
+  /** Null during a raid: the stash stays at home. */
+  stash: Record<string, number> | null;
   players: RosterEntry[];
   visible: Map<number, PlayerSnap>;
   myId: number;
