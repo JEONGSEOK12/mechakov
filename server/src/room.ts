@@ -1,7 +1,7 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
-  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_SIDE, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { ammoAfter, CHARACTER_IDS, skillUses, spendSkill, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
@@ -741,11 +741,29 @@ export class Room {
       if (!p.alive || p.role !== 'prop' || this.phase === 'end') continue;
       const size = bodySize(p.role, p.prop);
       const { offset, dir } = pending;
-      const pos: Vec3 = [p.body.pos[0] + offset[0], p.body.pos[1] + size[1] / 2 + offset[1], p.body.pos[2] + offset[2]];
+      let pos: Vec3 = [p.body.pos[0] + offset[0], p.body.pos[1] + size[1] / 2 + offset[1], p.body.pos[2] + offset[2]];
       const { kind, speed, damage, knockback } = p.weapon;
       if (kind !== 'rocket' && kind !== 'grenade') continue;
+      // Rockets come off the right shoulder (unless a wall is right there)
+      // and fly to whatever the crosshair was on, so they still hit where you aim.
+      let aim = dir;
+      const side = Math.hypot(dir[0], dir[2]);
+      if (kind === 'rocket' && side > 1e-3) {
+        const right: Vec3 = [-dir[2] / side, 0, dir[0] / side];
+        const wall = Math.min(...this.map.solids.map((b) => rayBox(pos, right, b) ?? Infinity));
+        const go = Math.min(ROCKET_SIDE, wall - 0.1);
+        if (go > 0) {
+          const boxes = [...this.map.solids, ...[...this.players.values()].filter((o) => o !== p && o.alive && !this.offStage(o)).map((o) => boxAt(o.body.pos, bodySize(o.role, o.prop)))];
+          const far = Math.min(60, ...boxes.map((b) => rayBox(pos, dir, b) ?? Infinity));
+          const target: Vec3 = [pos[0] + dir[0] * far, pos[1] + dir[1] * far, pos[2] + dir[2] * far];
+          pos = [pos[0] + right[0] * go, pos[1], pos[2] + right[2] * go];
+          const to: Vec3 = [target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]];
+          const len = Math.hypot(...to);
+          if (len > 1) aim = [to[0] / len, to[1] / len, to[2] / len];
+        }
+      }
       // Grenades get a little lift so they arc toward the crosshair.
-      const vel: Vec3 = [dir[0] * speed, dir[1] * speed + (kind === 'grenade' ? 2.5 : 0), dir[2] * speed];
+      const vel: Vec3 = [aim[0] * speed, aim[1] * speed + (kind === 'grenade' ? 2.5 : 0), aim[2] * speed];
       const id = this.nextRocketId++;
       this.rockets.set(id, { id, kind, owner: p.id, pos, vel, born: this.time, damage, knockback, bounced: false });
     }
