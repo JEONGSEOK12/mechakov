@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CHARACTER_IDS, CHARACTERS, characterOf } from '../../shared/characters.ts';
+import { CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN } from '../../shared/characters.ts';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
@@ -112,6 +112,9 @@ export class Game {
   private lastShot = 0;
   private lastRocket = 0;
   private lastSkill = -Infinity;
+  /** When the skill button went down, while it's held and charging. */
+  private skillHeldSince: number | null = null;
+  private lastDecoy = -Infinity;
   /** When the current raid began, for the opening tip. */
   private raidStartedAt = 0;
   private rocketFx = new RocketFx(this.scene);
@@ -156,8 +159,16 @@ export class Game {
 
     this.controls = new Controls(this.renderer.domElement);
     this.controls.onShoot = () => this.shoot();
-    this.controls.onSkill = () => this.useSkill();
+    this.controls.onSkill = (down) => this.useSkill(down);
     this.controls.onDisguise = () => {
+      const me = this.me;
+      if (me?.alive && me.role === 'prop' && characterOf(me.character).disguise === 'decoy') {
+        if (performance.now() - this.lastDecoy < DECOY_COOLDOWN * 1000) return;
+        this.lastDecoy = performance.now();
+        this.net.send({ t: 'decoy' });
+        sfx.disguise();
+        return;
+      }
       if (this.disguiseTarget !== null) this.net.send({ t: 'disguise', propId: this.disguiseTarget });
     };
     this.controls.onToggleRotationLock = () => {
@@ -241,6 +252,10 @@ export class Game {
           sfx.hurt();
           this.shake(0.25, 300);
         }
+        break;
+      case 'poof':
+        this.rocketFx.poof(msg.pos);
+        sfx.disguise();
         break;
       case 'bash': {
         const d = this.camera.position.distanceTo(new THREE.Vector3(...msg.pos));
@@ -459,17 +474,34 @@ export class Game {
     }, ROCKET_DELAY * 1000);
   }
 
-  /** The character's right-click skill; the server checks the cooldown too. */
-  private useSkill() {
+  /**
+   * The character's right-click skill: hold to charge, let go to use it.
+   * The server checks the cooldown too.
+   */
+  private useSkill(down: boolean) {
     const me = this.me;
     const skill = me && characterOf(me.character).skill;
-    if (!me?.alive || me.role !== 'prop' || !skill || this.phase === 'end' || this.huntersBlind()) return;
+    if (!me?.alive || me.role !== 'prop' || !skill || this.phase === 'end' || this.huntersBlind()) {
+      this.skillHeldSince = null;
+      return;
+    }
     const now = performance.now();
-    if (now - this.lastSkill < skill.cooldown * 1000) return;
+    if (down) {
+      if (now - this.lastSkill >= skill.cooldown * 1000) this.skillHeldSince = now;
+      return;
+    }
+    if (this.skillHeldSince === null) return;
+    const power = this.skillPower(skill.chargeTime);
+    this.skillHeldSince = null;
     this.lastSkill = now;
-    this.net.send({ t: 'skill', yaw: this.controls.yaw });
+    this.net.send({ t: 'skill', yaw: this.controls.yaw, power });
     sfx.charge();
-    this.shake(0.12, 250);
+    this.shake(0.12 + 0.15 * power, 250);
+  }
+
+  /** 0..1: how far the held skill has charged. */
+  private skillPower(chargeTime: number) {
+    return this.skillHeldSince === null ? 0 : Math.min(1, (performance.now() - this.skillHeldSince) / 1000 / chargeTime);
   }
 
   /** Props hold fire while hunters wait out the hiding phase. */
@@ -716,9 +748,14 @@ export class Game {
     if (me?.alive && me.role === 'prop' && !this.map.stations) {
       const char = characterOf(me.character);
       if (char.disguise === 'invisible') hints.push(me.invisible ? '투명 상태 (움직이거나 공격하면 풀려요)' : '가만히 2초 있으면 투명');
+      if (char.disguise === 'decoy') {
+        const left = DECOY_COOLDOWN - (performance.now() - this.lastDecoy) / 1000;
+        hints.push(`E: 분신 세우기${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
+      }
       if (char.skill) {
         const left = char.skill.cooldown - (performance.now() - this.lastSkill) / 1000;
-        hints.push(`우클릭: ${char.skill.name}${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
+        if (this.skillHeldSince !== null) hints.push(`${char.skill.name} 충전 ${Math.round(this.skillPower(char.skill.chargeTime) * 100)}%`);
+        else hints.push(`우클릭 누르고 떼기: ${char.skill.name}${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
       }
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);

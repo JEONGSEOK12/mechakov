@@ -133,6 +133,12 @@ export class RocketFx {
     this.flashAt = performance.now();
   }
 
+  /** A decoy popping: a quick white puff. */
+  poof(at: Vec3) {
+    const pos = new THREE.Vector3(at[0], at[1] + 0.4, at[2]);
+    for (let i = 0; i < 8; i++) this.puff(pos, 0xf0f0f0, 0.9 + Math.random() * 0.6, 450 + Math.random() * 250, 1);
+  }
+
   update() {
     const now = performance.now();
     for (const f of this.flying.values()) {
