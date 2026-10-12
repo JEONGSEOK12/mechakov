@@ -93,7 +93,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'prop',
-    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 20 }),
+    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 30 }),
     skill: null,
   },
   grenadier: {
@@ -112,7 +112,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'decoy',
-    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 20 }),
+    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 30 }),
     skill: null,
   },
 };
