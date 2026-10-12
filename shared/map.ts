@@ -63,15 +63,22 @@ const ROADS = [-30, 30];
 const ROAD_WIDTH = 8;
 
 // Prop groups by what kind of place they belong in.
-const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket', 'paintCan', 'smallBox'];
-const DOCK = ['pallet', 'forkPallet', 'crate', 'crate', 'smallBox', 'sack', 'handTruck'];
-const WORKSHOP = ['toolbox', 'gasCan', 'spool', 'barrel', 'bucket', 'tire', 'extinguisher', 'paintCan', 'cabinet', 'handTruck'];
-const OFFICE_WALL = ['cabinet', 'bookshelf', 'plant', 'cooler', 'printer', 'locker', 'whiteboard', 'bookshelf', 'cabinet'];
-const LOUNGE = ['sofa', 'plant', 'cooler', 'trashCan', 'floorLamp', 'vending', 'sofa'];
+const STORAGE = ['crate', 'crate', 'smallBox', 'barrel', 'sack', 'pallet', 'bucket', 'paintCan', 'smallBox', 'boxStack', 'ibcTank'];
+const DOCK = ['pallet', 'forkPallet', 'crate', 'crate', 'smallBox', 'sack', 'handTruck', 'boxStack', 'ibcTank'];
+const WORKSHOP = ['toolbox', 'gasCan', 'spool', 'barrel', 'bucket', 'tire', 'extinguisher', 'paintCan', 'cabinet', 'handTruck', 'stepLadder', 'shelfUnit', 'safe'];
+const OFFICE_WALL = ['cabinet', 'bookshelf', 'plant', 'cooler', 'printer', 'locker', 'whiteboard', 'bookshelf', 'cabinet', 'safe', 'coatRack', 'shelfUnit'];
+const LOUNGE = ['sofa', 'plant', 'cooler', 'trashCan', 'floorLamp', 'vending', 'sofa', 'armchair', 'armchair', 'coatRack', 'planter'];
 const SERVER = ['serverRack', 'serverRack', 'serverRack', 'cabinet'];
-const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp', 'vending'];
-const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher'];
-const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier', 'wheelbarrow', 'pipes', 'paintCan'];
+const CORRIDOR = ['plant', 'trashCan', 'extinguisher', 'cooler', 'floorLamp', 'vending', 'planter', 'armchair'];
+const FUEL = ['barrel', 'barrel', 'gasBottle', 'gasCan', 'extinguisher', 'ibcTank'];
+const BUILD_SITE = ['block', 'block', 'sandbag', 'spool', 'cone', 'tire', 'barrier', 'wheelbarrow', 'pipes', 'paintCan', 'logPile', 'stepLadder', 'portaPotty'];
+
+/** Tall props that make an L-shaped blind spot, and small ones tucked inside, per theme. */
+const NOOKS: Record<Exclude<Theme, 'hideout' | 'range'>, [string[], string[]]> = {
+  warehouse: [['boxStack', 'forkPallet', 'ibcTank', 'shelfUnit', 'locker'], ['smallBox', 'barrel', 'crate', 'bucket', 'sack']],
+  office: [['bookshelf', 'locker', 'shelfUnit', 'whiteboard', 'boxStack'], ['archiveBox', 'trashCan', 'plant', 'chair', 'safe']],
+  yard: [['portaPotty', 'ibcTank', 'boxStack', 'forkPallet', 'dumpster'], ['tire', 'barrel', 'block', 'sandbag', 'gasCan']],
+};
 
 /** Where the eight areas around the middle sit: a 3x3 grid split by the roads. */
 const CELL = 62;
@@ -115,8 +122,10 @@ function tables(L: Local, x0: number, x1: number, z0: number, z1: number, step: 
 function sofaGroup(L: Local, x: number, z: number) {
   L.prop('sofa', x, z - 1.4, 0);
   L.prop('coffeeTable', x, z);
-  L.prop('sofa', x, z + 1.4, 2);
-  if (L.chance(0.5)) L.prop('plant', x + 1.6, z + 1.6);
+  if (L.chance(0.5)) L.prop('sofa', x, z + 1.4, 2);
+  else for (const dx of [-0.6, 0.6]) L.prop('armchair', x + dx, z + 1.4, 2);
+  if (L.chance(0.6)) L.prop(L.pick(LOUNGE), x + 1.7, z + 1.6);
+  if (L.chance(0.4)) L.prop(L.pick(['coatRack', 'floorLamp', 'plant']), x - 1.7, z - 1.6);
 }
 
 /**
@@ -500,6 +509,17 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
       b.line(roadside, -half + 6, v + side, half - 6, v + side, 5, 0.12, 0);
     }
   }
+  // Blind spots: tall things in an L with room to tuck in behind them.
+  const [tall, hide] = NOOKS[theme];
+  for (let placed = 0, tries = 0; placed < { warehouse: 12, office: 8, yard: 24 }[theme] && tries < 600; tries++) {
+    const z = b.zones[Math.floor(rand() * b.zones.length)];
+    const x = z.min[0] + 2 + rand() * (z.max[0] - z.min[0] - 4);
+    const y = z.min[1] + 2 + rand() * (z.max[1] - z.min[1] - 4);
+    if (b.nook(tall, hide, x, y)) placed++;
+  }
+  // A wandering edge instead of a square, leaving the exit corners open.
+  for (const e of exits) b.keepClear(Math.max(-half, e.min[0] - 16), Math.max(-half, e.min[2] - 16), Math.min(half, e.max[0] + 16), Math.min(half, e.max[2] + 16));
+  b.ragged(18, 6, wallHeight);
   const { walls, props, propBoxes, zones, roads, buildings } = b;
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
   const solids = [...walls, ...propBoxes, ...skyFence(half, wallHeight)];

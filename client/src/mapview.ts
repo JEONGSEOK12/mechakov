@@ -88,11 +88,23 @@ export class MapView {
       g.fillStyle = b.max[1] > 1.5 ? '#6f6656' : '#4c5058';
       g.fillRect(X(b.min[0]), Z(b.min[2]), Math.max(1.5, (b.max[0] - b.min[0]) * s), Math.max(1.5, (b.max[2] - b.min[2]) * s));
     }
+    const edges: typeof map.walls = [];
     for (const w of map.walls) {
       if (w.min[1] > 0) continue;
       const outer = w.max[1] >= map.wallHeight;
+      // The blocks that make the edge wander are out of bounds, drawn dark with a bright rim.
+      const h = map.half - 0.01;
+      const edge = Math.min(w.max[0] - w.min[0], w.max[2] - w.min[2]) > 0.6 && (w.min[0] <= -h || w.max[0] >= h || w.min[2] <= -h || w.max[2] >= h);
+      if (edge) {
+        edges.push(w);
+        continue;
+      }
       g.fillStyle = outer ? '#c9ced4' : w.max[1] > 1.5 ? '#9aa3ad' : '#6a737d';
       g.fillRect(X(w.min[0]), Z(w.min[2]), Math.max(2, (w.max[0] - w.min[0]) * s), Math.max(2, (w.max[2] - w.min[2]) * s));
+    }
+    for (const [color, grow] of [['#c9ced4', 2], ['#101215', 0]] as const) {
+      g.fillStyle = color;
+      for (const w of edges) g.fillRect(X(w.min[0]) - grow, Z(w.min[2]) - grow, (w.max[0] - w.min[0]) * s + grow * 2, (w.max[2] - w.min[2]) * s + grow * 2);
     }
     for (const e of map.exits) {
       g.fillStyle = 'rgba(61, 220, 132, 0.85)';
