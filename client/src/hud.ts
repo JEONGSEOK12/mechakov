@@ -71,6 +71,16 @@ export class Hud {
     if (el.textContent !== name) el.textContent = name;
   }
 
+  /** Shots left in the clip as pips under the crosshair, or the reload countdown once it's empty. */
+  ammo(left: number | null, clip: number, reloadIn: number) {
+    const el = $('ammo');
+    el.classList.toggle('hidden', left === null);
+    if (left === null) return;
+    const text = left < 1 ? `재장전 ${reloadIn.toFixed(1)}` : '●'.repeat(left) + '○'.repeat(clip - left);
+    if (el.textContent !== text) el.textContent = text;
+    el.classList.toggle('empty', left < 1);
+  }
+
   /** Sprint stamina, 0..1; orange while out of breath. Hidden when not moving around. */
   stamina(value: number | null, winded: boolean) {
     const bar = $('stamina-bar');

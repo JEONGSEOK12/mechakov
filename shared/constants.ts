@@ -5,7 +5,7 @@ export const DEFAULT_PORT = 2567;
 export const TICK_RATE = 30;
 export const TICK_DT = 1 / TICK_RATE;
 
-export const GRAVITY = 24;
+export const GRAVITY = 20;
 export const JUMP_SPEED = 8;
 export const STEP_HEIGHT = 0.4;
 export const HUNTER_SPEED = 4;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN } from '../../shared/characters.ts';
+import { ammoAfter, CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, type WeaponDef } from '../../shared/characters.ts';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
@@ -111,7 +111,9 @@ export class Game {
   private faceLocked = false;
   private lockedFace = 0;
   private lastShot = 0;
-  private lastRocket = 0;
+  private lastRocket = -Infinity;
+  /** Shots left in the clip right after `lastRocket`; see `ammoAfter`. */
+  private ammo = 0;
   private lastSkill = -Infinity;
   /** Damage numbers floating up from where your hits landed. */
   private floats: { el: HTMLElement; pos: THREE.Vector3; born: number }[] = [];
@@ -336,11 +338,14 @@ export class Game {
     this.phaseSounds(this.phase, msg.phase);
     // The last raid's result stays up (and in the lobby) until the next one starts.
     if (msg.phase === 'countdown' && this.phase !== 'countdown') this.result = null;
+    const newPhase = msg.phase !== this.phase;
     this.phase = msg.phase;
     this.timeLeft = msg.timeLeft;
     this.timeAt = performance.now();
     this.latest = new Map(msg.players.map((p) => [p.id, p]));
     this.roster = new Map(msg.roster.map((p) => [p.id, p]));
+    // The server fills the clip when a raid starts or you switch character.
+    if (newPhase || this.me?.character !== prevMe?.character) this.lastRocket = -Infinity;
     this.snaps.push({ at: this.timeAt, players: this.latest });
     this.rocketFx.sync(msg.rockets ?? []);
     while (this.snaps.length > 30) this.snaps.shift();
@@ -472,7 +477,7 @@ export class Game {
     if (me.role === 'prop') {
       const weapon = characterOf(me.character).weapon;
       if (weapon.kind === 'hitscan') this.fireGun(weapon.cooldown);
-      else this.fireRocket(weapon.cooldown);
+      else this.fireRocket(weapon);
       return;
     }
     if (me.role !== 'hunter' || this.phase !== 'hunt') return;
@@ -490,10 +495,13 @@ export class Game {
   }
 
   /** Props fire a rocket where the crosshair points; the server decides if it's allowed. */
-  private fireRocket(cooldown: number) {
+  private fireRocket(weapon: WeaponDef) {
     if (this.phase === 'end' || this.huntersBlind()) return;
     const now = performance.now();
-    if (now - this.lastRocket < cooldown * 1000) return;
+    if (now - this.lastRocket < weapon.cooldown * 1000) return;
+    const ammo = ammoAfter(weapon, this.ammo, this.lastRocket / 1000, now / 1000);
+    if (ammo < 1) return;
+    this.ammo = ammo - 1;
     this.lastRocket = now;
     const p = this.camera.position;
     this.net.send({ t: 'rocket', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
@@ -741,6 +749,12 @@ export class Game {
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart, !this.huntersInRound());
     this.hud.me(me, this.phase, this.map.theme);
     this.hud.stamina(this.body ? this.body.stamina : null, !!this.body?.winded);
+    const weapon = me?.alive && me.role === 'prop' ? characterOf(me.character).weapon : null;
+    if (weapon?.clip) {
+      const now = performance.now() / 1000;
+      const left = ammoAfter(weapon, this.ammo, this.lastRocket / 1000, now);
+      this.hud.ammo(left, weapon.clip, left < 1 ? weapon.reload - (now - this.lastRocket / 1000) : 0);
+    } else this.hud.ammo(null, 0, 0);
     const at = this.body?.pos ?? [this.camera.position.x, 0, this.camera.position.z];
     const zone = this.map.theme === 'hideout' ? null : zoneAt(this.map, at[0], at[2]);
     this.hud.zone(zone?.name ?? '');

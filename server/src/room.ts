@@ -3,7 +3,7 @@ import {
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
   GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
-import { CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
+import { ammoAfter, CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
@@ -36,6 +36,8 @@ export class Player {
   inputs: InputMsg[] = [];
   lastShot = -Infinity;
   lastRocket = -Infinity;
+  /** Shots left in the clip right after `lastRocket`; see `ammoAfter`. */
+  ammo = 0;
   lastSkill = -Infinity;
   /** Seconds without moving or attacking, for the `invisible` disguise. */
   stillFor = 0;
@@ -464,6 +466,7 @@ export class Room {
     p.extracted = false;
     p.hp = maxHp(p.profile);
     p.prop = DEFAULT_PROP;
+    p.lastRocket = -Infinity;
     p.bag = [];
     p.outcome = null;
     p.inRound = false;
@@ -507,6 +510,7 @@ export class Room {
       p.extractTime = 0;
       p.hp = maxHp(p.profile);
       p.lastShot = -Infinity;
+      p.lastRocket = -Infinity;
       if (i < hunterCount) {
         p.role = 'hunter';
         p.prop = null;
@@ -639,6 +643,7 @@ export class Room {
     if (!CHARACTERS[id] || (this.phase !== 'lobby' && this.phase !== 'countdown')) return;
     p.profile.character = id;
     p.hp = maxHp(p.profile);
+    p.lastRocket = -Infinity;
     this.store.save();
     this.send(p, { t: 'profile', profile: p.profile });
   }
@@ -708,6 +713,9 @@ export class Room {
     const kind = p.weapon.kind;
     if (!p.alive || p.role !== 'prop' || (kind !== 'rocket' && kind !== 'grenade') || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
     if (this.time - p.lastRocket < p.weapon.cooldown - 0.05) return;
+    // A little slack for the client's clock running ahead of ours.
+    const ammo = ammoAfter(p.weapon, p.ammo, p.lastRocket, this.time + 0.1);
+    if (ammo < 1) return;
     const len = Math.hypot(...rawDir);
     if (len < 1e-6) return;
     const dir: Vec3 = [rawDir[0] / len, rawDir[1] / len, rawDir[2] / len];
@@ -715,6 +723,7 @@ export class Room {
     const center: Vec3 = [p.body.pos[0], p.body.pos[1] + size[1] / 2, p.body.pos[2]];
     if (Math.hypot(origin[0] - center[0], origin[1] - center[1], origin[2] - center[2]) > 8) return;
     p.lastRocket = this.time;
+    p.ammo = ammo - 1;
     p.stillFor = 0;
     // Start on the camera ray where it passes the prop, so it flies at the crosshair.
     const along = Math.max(0, (center[0] - origin[0]) * dir[0] + (center[1] - origin[1]) * dir[1] + (center[2] - origin[2]) * dir[2]);
