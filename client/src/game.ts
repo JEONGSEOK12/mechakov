@@ -30,14 +30,34 @@ interface Snapshot {
 class Avatar {
   readonly group = new THREE.Group();
   private look = '';
+  private ghost = false;
 
   setLook(role: PlayerSnap['role'], prop: string | null) {
     const look = role === 'prop' ? `prop:${prop}` : role;
     if (look === this.look) return;
     this.look = look;
+    this.ghost = false;
     this.group.clear();
     if (role === 'prop' && prop) this.group.add(createPropMesh(prop));
     else if (role === 'hunter') this.group.add(createHunterMesh());
+  }
+
+  /** See-through, for showing yourself while invisible. Uses copies since prop materials are shared. */
+  setGhost(on: boolean) {
+    if (on === this.ghost) return;
+    this.ghost = on;
+    this.group.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      if (on) {
+        o.userData.solid = o.material;
+        const m = (o.material as THREE.Material).clone();
+        Object.assign(m, { transparent: true, opacity: 0.28, depthWrite: false });
+        o.material = m;
+      } else if (o.userData.solid) {
+        (o.material as THREE.Material).dispose();
+        o.material = o.userData.solid;
+      }
+    });
   }
 }
 
@@ -91,6 +111,7 @@ export class Game {
   private lockedFace = 0;
   private lastShot = 0;
   private lastRocket = 0;
+  private lastSkill = -Infinity;
   /** When the current raid began, for the opening tip. */
   private raidStartedAt = 0;
   private rocketFx = new RocketFx(this.scene);
@@ -135,6 +156,7 @@ export class Game {
 
     this.controls = new Controls(this.renderer.domElement);
     this.controls.onShoot = () => this.shoot();
+    this.controls.onSkill = () => this.useSkill();
     this.controls.onDisguise = () => {
       if (this.disguiseTarget !== null) this.net.send({ t: 'disguise', propId: this.disguiseTarget });
     };
@@ -220,6 +242,20 @@ export class Game {
           this.shake(0.25, 300);
         }
         break;
+      case 'bash': {
+        const d = this.camera.position.distanceTo(new THREE.Vector3(...msg.pos));
+        sfx.bash(d);
+        if (msg.from === this.myId) {
+          this.hud.hitmarker();
+          sfx.hitConfirm();
+          this.shake(0.2, 200);
+        }
+        if (msg.victim === this.myId) {
+          this.hud.damaged();
+          this.shake(0.35, 300);
+        }
+        break;
+      }
       case 'boom': {
         this.rocketFx.boom(msg.pos);
         const d = this.camera.position.distanceTo(new THREE.Vector3(...msg.pos));
@@ -299,7 +335,10 @@ export class Game {
       return;
     }
     const before = this.body ? ([...this.body.pos] as Vec3) : null;
-    this.body = { pos: [...me.pos], vy: me.vy, vx: me.vx ?? 0, vz: me.vz ?? 0, onGround: me.onGround, stamina: me.stamina, winded: me.winded };
+    this.body = {
+      pos: [...me.pos], vy: me.vy, vx: me.vx ?? 0, vz: me.vz ?? 0, onGround: me.onGround, stamina: me.stamina, winded: me.winded,
+      charge: me.charge ?? 0, chargeX: me.chargeX ?? 0, chargeZ: me.chargeZ ?? 0,
+    };
     this.pending = this.pending.filter((i) => i.seq > me.seq);
     const frozen = this.phase === 'hide' && me.role === 'hunter';
     for (const i of this.pending) {
@@ -385,8 +424,8 @@ export class Game {
     }
     if (me.role === 'prop') {
       const weapon = characterOf(me.character).weapon;
-      if (weapon.kind === 'rocket') this.fireRocket(weapon.cooldown);
-      else this.fireGun(weapon.cooldown);
+      if (weapon.kind === 'hitscan') this.fireGun(weapon.cooldown);
+      else this.fireRocket(weapon.cooldown);
       return;
     }
     if (me.role !== 'hunter' || this.phase !== 'hunt') return;
@@ -412,10 +451,25 @@ export class Game {
     const p = this.camera.position;
     this.net.send({ t: 'rocket', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
     // The server launches it after a short wind-up; the whoosh matches.
+    const grenade = characterOf(this.me?.character).weapon.kind === 'grenade';
     setTimeout(() => {
-      sfx.rocketFire();
+      if (grenade) sfx.grenadeFire();
+      else sfx.rocketFire();
       this.shake(0.05, 100);
     }, ROCKET_DELAY * 1000);
+  }
+
+  /** The character's right-click skill; the server checks the cooldown too. */
+  private useSkill() {
+    const me = this.me;
+    const skill = me && characterOf(me.character).skill;
+    if (!me?.alive || me.role !== 'prop' || !skill || this.phase === 'end' || this.huntersBlind()) return;
+    const now = performance.now();
+    if (now - this.lastSkill < skill.cooldown * 1000) return;
+    this.lastSkill = now;
+    this.net.send({ t: 'skill', yaw: this.controls.yaw });
+    sfx.charge();
+    this.shake(0.12, 250);
   }
 
   /** Props hold fire while hunters wait out the hiding phase. */
@@ -504,6 +558,7 @@ export class Game {
       if (!visible) continue;
       const isMe = p.id === this.myId && me;
       avatar.setLook(isMe ? me.role : p.role, isMe ? me.prop : p.prop);
+      avatar.setGhost(!!isMe && me.invisible);
       if (isMe && myPos) {
         avatar.group.position.copy(myPos);
         avatar.group.rotation.y = this.faceLocked ? this.lockedFace : this.controls.yaw;
@@ -594,7 +649,7 @@ export class Game {
     this.disguiseTarget = null;
     this.disguiseLocked = null;
     this.highlight.visible = false;
-    if (!me || !myPos || me.role !== 'prop' || this.phase === 'end') return;
+    if (!me || !myPos || me.role !== 'prop' || characterOf(me.character).disguise !== 'prop' || this.phase === 'end') return;
     const fwd = new THREE.Vector3(...lookDir(this.controls.yaw, this.controls.pitch));
     this.raycaster.set(this.camera.position, fwd);
     this.raycaster.far = 20;
@@ -657,6 +712,14 @@ export class Game {
     if (this.pickupTarget !== null) {
       const name = ITEMS[this.loot.get(this.pickupTarget)!.data.type].name;
       hints.push(this.bag.length >= this.bagCapacity ? `가방이 가득 찼어요 (${name})` : `F: ${name} 줍기`);
+    }
+    if (me?.alive && me.role === 'prop' && !this.map.stations) {
+      const char = characterOf(me.character);
+      if (char.disguise === 'invisible') hints.push(me.invisible ? '투명 상태 (움직이거나 공격하면 풀려요)' : '가만히 2초 있으면 투명');
+      if (char.skill) {
+        const left = char.skill.cooldown - (performance.now() - this.lastSkill) / 1000;
+        hints.push(`우클릭: ${char.skill.name}${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
+      }
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
     if (this.disguiseLocked !== null) hints.push(`${PROPS[this.map.props[this.disguiseLocked].type].name}: 변신 도감 업그레이드 필요`);

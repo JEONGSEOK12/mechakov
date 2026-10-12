@@ -7,6 +7,7 @@ interface Flying {
   group: THREE.Group;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
+  grenade: boolean;
   /** When the snapshot that placed it arrived; it flies on from there between snapshots. */
   at: number;
   lastPuff: number;
@@ -22,7 +23,7 @@ interface Fading {
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** Props' rockets in flight, their smoke trails and explosions. */
+/** Props' rockets and grenades in flight, their smoke trails and explosions. */
 export class RocketFx {
   private flying = new Map<number, Flying>();
   private fading: Fading[] = [];
@@ -38,6 +39,10 @@ export class RocketFx {
   private bodyMat = new THREE.MeshStandardMaterial({ color: 0x4d5a3c, roughness: 0.6, metalness: 0.3 });
   private noseMat = new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.5 });
   private flameMat = new THREE.MeshBasicMaterial({ color: 0xffb040 });
+  private grenadeGeo = new THREE.SphereGeometry(0.11, 12, 10);
+  private bandGeo = new THREE.TorusGeometry(0.11, 0.025, 6, 16);
+  private grenadeMat = new THREE.MeshStandardMaterial({ color: 0x2f3a2a, roughness: 0.5, metalness: 0.4 });
+  private bandMat = new THREE.MeshBasicMaterial({ color: 0xff5030 });
 
   constructor(private scene: THREE.Scene) {
     scene.add(this.flash);
@@ -61,6 +66,17 @@ export class RocketFx {
     return g;
   }
 
+  /** A dark pill with a glowing band, like a TF2 grenade. */
+  private makeGrenade(): THREE.Group {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(this.grenadeGeo, this.grenadeMat);
+    body.scale.set(1, 1.35, 1);
+    const band = new THREE.Mesh(this.bandGeo, this.bandMat);
+    band.rotation.x = Math.PI / 2;
+    g.add(body, band);
+    return g;
+  }
+
   /** Matches the rockets in a snapshot: new ones appear, gone ones disappear. */
   sync(rockets: RocketSnap[]) {
     const now = performance.now();
@@ -69,14 +85,15 @@ export class RocketFx {
       seen.add(r.id);
       let f = this.flying.get(r.id);
       if (!f) {
-        f = { group: this.makeRocket(), pos: new THREE.Vector3(), vel: new THREE.Vector3(), at: now, lastPuff: 0 };
+        const grenade = r.kind === 'grenade';
+        f = { group: grenade ? this.makeGrenade() : this.makeRocket(), grenade, pos: new THREE.Vector3(), vel: new THREE.Vector3(), at: now, lastPuff: 0 };
         this.scene.add(f.group);
         this.flying.set(r.id, f);
       }
       f.pos.set(...r.pos);
       f.vel.set(...r.vel);
       f.at = now;
-      f.group.quaternion.setFromUnitVectors(UP, f.vel.clone().normalize());
+      if (!f.grenade && f.vel.lengthSq() > 1e-6) f.group.quaternion.setFromUnitVectors(UP, f.vel.clone().normalize());
     }
     for (const [id, f] of this.flying) {
       if (seen.has(id)) continue;
@@ -121,7 +138,15 @@ export class RocketFx {
     for (const f of this.flying.values()) {
       const dt = (now - f.at) / 1000;
       f.group.position.copy(f.pos).addScaledVector(f.vel, Math.min(dt, 0.15));
-      if (now - f.lastPuff > 30) {
+      if (f.grenade) {
+        // Tumbles as it flies; a thin trail.
+        f.group.rotation.x += 0.25;
+        f.group.rotation.z += 0.12;
+        if (now - f.lastPuff > 60 && f.vel.lengthSq() > 4) {
+          f.lastPuff = now;
+          this.puff(f.group.position.clone(), 0xd0d0d0, 0.3, 350);
+        }
+      } else if (now - f.lastPuff > 30) {
         f.lastPuff = now;
         const tail = f.group.position.clone().addScaledVector(f.vel, -0.02);
         this.puff(tail, 0xb8b8b8, 0.7, 600);

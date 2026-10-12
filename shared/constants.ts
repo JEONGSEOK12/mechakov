@@ -48,14 +48,18 @@ export const SHOT_RANGE = 60;
 export const DISGUISE_RANGE = 4;
 
 /**
- * Props' explosive rockets: slow enough to dodge, weak, but they throw people
- * around. Damage, cooldown and knockback come from the character (`CHARACTERS`).
+ * Props' explosive projectiles (rockets and grenades): slow enough to dodge,
+ * weak, but they throw people around. Speed, damage, cooldown and knockback
+ * come from the character's weapon (`CHARACTERS`).
  */
-export const ROCKET_SPEED = 20;
 export const ROCKET_LIFETIME = 4;
 export const ROCKET_RADIUS = 2.4;
 /** A short wind-up between clicking and the rocket leaving, in seconds. */
 export const ROCKET_DELAY = 0.15;
+/** Grenades fall at this many m/s², keep this much speed when they bounce, and go off after `GRENADE_FUSE` seconds. */
+export const GRENADE_GRAVITY = 14;
+export const GRENADE_BOUNCE = 0.45;
+export const GRENADE_FUSE = 2.2;
 /** Per-second fade of knockback speed. */
 export const KNOCKBACK_GROUND_DRAG = 9;
 export const KNOCKBACK_AIR_DRAG = 0.4;

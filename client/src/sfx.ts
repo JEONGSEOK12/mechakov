@@ -141,6 +141,20 @@ export const sfx = {
     noise(0.45, { filter: 'bandpass', freq: 900, to: 300, q: 0.8, volume: 0.35 });
     tone(220, 0.25, { type: 'sawtooth', to: 90, volume: 0.12 });
   },
+  grenadeFire() {
+    tone(140, 0.12, { type: 'square', to: 60, volume: 0.25 });
+    noise(0.18, { filter: 'bandpass', freq: 500, q: 1.2, volume: 0.3 });
+  },
+  charge() {
+    noise(0.5, { filter: 'bandpass', freq: 400, to: 1600, q: 1, volume: 0.3 });
+    tone(110, 0.4, { type: 'sawtooth', to: 220, volume: 0.12 });
+  },
+  bash(dist: number) {
+    const v = falloff(dist);
+    if (v <= 0.01) return;
+    noise(0.2, { freq: 900, to: 150, volume: 0.6 * v });
+    tone(90, 0.2, { type: 'square', to: 45, volume: 0.3 * v });
+  },
   explosion(dist: number) {
     const v = Math.max(0, 1 - dist / 60) ** 1.5;
     if (v <= 0.01) return;

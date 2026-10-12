@@ -1,16 +1,16 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
-  ROCKET_DELAY, ROCKET_RADIUS, ROCKET_SPEED, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
-import { CHARACTER_IDS, CHARACTERS, characterOf } from '../../shared/characters.ts';
-import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
+import { CHARACTER_IDS, CHARACTERS, characterOf, INVISIBLE_AFTER } from '../../shared/characters.ts';
+import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
 import type { Theme } from '../../shared/props.ts';
 import { bodySize, newBody, stepBody, unstick, type BodyState } from '../../shared/physics.ts';
 import type { ClientMsg, Loot, Outcome, PlayerSnap, RocketSnap, ServerMsg, ShotHit } from '../../shared/protocol.ts';
-import type { InputKeys, Phase, Role, Team, Vec3 } from '../../shared/types.ts';
+import type { Box, InputKeys, Phase, Role, Team, Vec3 } from '../../shared/types.ts';
 import {
   bagCapacity, canAfford, canDisguiseAs, maxHp, missPenalty, nextCost, speedMult, UPGRADES, type Profile,
 } from '../../shared/upgrades.ts';
@@ -36,6 +36,9 @@ export class Player {
   inputs: InputMsg[] = [];
   lastShot = -Infinity;
   lastRocket = -Infinity;
+  lastSkill = -Infinity;
+  /** Seconds without moving or attacking, for the `invisible` disguise. */
+  stillFor = 0;
   /** A rocket winding up: where it starts relative to the prop's centre, its direction and when it leaves. */
   pendingRocket: { offset: Vec3; dir: Vec3; at: number } | null = null;
   /** Items picked up this raid; lost on death. */
@@ -53,8 +56,17 @@ export class Player {
     return this.profile.name;
   }
 
+  get character() {
+    return characterOf(this.profile.character);
+  }
+
   get weapon() {
-    return characterOf(this.profile.character).weapon;
+    return this.character.weapon;
+  }
+
+  /** Vanished from everyone else's view by standing still. */
+  get invisible() {
+    return this.alive && this.role === 'prop' && this.character.disguise === 'invisible' && this.stillFor >= INVISIBLE_AFTER;
   }
 
   snap(extractTime: number): PlayerSnap {
@@ -75,6 +87,10 @@ export class Player {
       onGround: this.body.onGround,
       stamina: this.body.stamina,
       winded: this.body.winded,
+      charge: this.body.charge,
+      chargeX: this.body.chargeX,
+      chargeZ: this.body.chargeZ,
+      invisible: this.invisible,
       yaw: this.yaw,
       pitch: this.pitch,
       face: this.face,
@@ -117,6 +133,19 @@ interface Rocket extends RocketSnap {
   born: number;
   damage: number;
   knockback: number;
+  /** Grenades only go off on a player they hit before their first bounce. */
+  bounced: boolean;
+}
+
+/** Which axis's face of a box a point just outside it is closest to. */
+function faceAxis(p: Vec3, b: Box): 0 | 1 | 2 {
+  let best: 0 | 1 | 2 = 0;
+  let bestD = Infinity;
+  for (const i of [0, 1, 2] as const) {
+    const d = Math.min(Math.abs(p[i] - b.min[i]), Math.abs(p[i] - b.max[i]));
+    if (d < bestD) [best, bestD] = [i, d];
+  }
+  return best;
 }
 
 function inBox(p: Vec3, b: { min: Vec3; max: Vec3 }) {
@@ -233,6 +262,9 @@ export class Room {
       case 'rocket':
         if (isVec3(msg.origin) && isVec3(msg.dir)) this.fireRocket(p, msg.origin, msg.dir);
         break;
+      case 'skill':
+        if (isNum(msg.yaw)) this.useSkill(p, msg.yaw);
+        break;
       case 'disguise':
         if (isNum(msg.propId)) this.disguise(p, msg.propId);
         break;
@@ -270,6 +302,7 @@ export class Room {
         p.inputs.length = 0;
         continue;
       }
+      const was: Vec3 = [...p.body.pos];
       // Normally one input per tick; catch up a little when a client falls behind.
       const steps = p.inputs.length > 2 ? 2 : 1;
       for (let i = 0; i < steps; i++) {
@@ -282,6 +315,9 @@ export class Room {
         stepBody(p.body, p.role, p.prop, input.keys, p.yaw, frozen, TICK_DT, this.map.solids, speedMult(p.profile));
         p.seq = input.seq;
       }
+      const moved = Math.hypot(p.body.pos[0] - was[0], p.body.pos[1] - was[1], p.body.pos[2] - was[2]) > 0.005;
+      p.stillFor = moved || p.body.charge > 0 ? 0 : p.stillFor + TICK_DT;
+      if (p.body.charge > 0) this.chargeHit(p);
       this.updateExtraction(p);
     }
     this.launchRockets();
@@ -291,8 +327,9 @@ export class Room {
   }
 
   /**
-   * Hunters only receive props they could actually see, so a modified client
-   * can't show hiding players through walls. Everyone else gets everything.
+   * Hunters only receive props they could actually see, and nobody receives
+   * invisible players, so a modified client can't show hiding players.
+   * Everyone else gets everything.
    */
   private sendSnapshots() {
     const all = [...this.players.values()];
@@ -300,15 +337,19 @@ export class Room {
     const shown = this.map.theme === 'hideout' ? all.filter((p) => !p.bot) : all;
     const snaps = new Map(shown.map((p) => [p.id, p.snap(this.timings.extract)]));
     const roster = all.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
-    const rockets = [...this.rockets.values()].map(({ id, pos, vel }) => ({ id, pos, vel }));
+    const rockets = [...this.rockets.values()].map(({ id, kind, pos, vel }) => ({ id, kind, pos, vel }));
     const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster, rockets };
     const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
+    // Invisible players are left out for everyone but themselves.
+    const anyInvisible = shown.some((p) => p.invisible);
     for (const viewer of all) {
-      if (viewer.role !== 'hunter' || !viewer.alive || (this.phase !== 'hide' && this.phase !== 'hunt')) {
+      const hunting = viewer.role === 'hunter' && viewer.alive && (this.phase === 'hide' || this.phase === 'hunt');
+      if (!hunting && !anyInvisible) {
         viewer.conn.send(everything);
         continue;
       }
-      const visible = shown.filter((p) => p.role !== 'prop' || !p.alive || (this.phase === 'hunt' && this.canSee(viewer, p)));
+      const visible = shown.filter((p) => p === viewer || (!p.invisible &&
+        (!hunting || p.role !== 'prop' || !p.alive || (this.phase === 'hunt' && this.canSee(viewer, p)))));
       viewer.conn.send(JSON.stringify({ ...base, players: visible.map((p) => snaps.get(p.id)!) }));
     }
   }
@@ -506,7 +547,7 @@ export class Room {
   }
 
   private disguise(p: Player, propId: number) {
-    if (!p.alive || p.role !== 'prop' || this.phase === 'end') return;
+    if (!p.alive || p.role !== 'prop' || p.character.disguise !== 'prop' || this.phase === 'end') return;
     const target = this.map.props[propId];
     if (!target || !canDisguiseAs(p.profile, target.type)) return;
     const size = bodySize(p.role, p.prop);
@@ -586,6 +627,7 @@ export class Room {
     // hit things behind them.
     if (Math.hypot(origin[0] - eye[0], origin[1] - eye[1], origin[2] - eye[2]) > (hunter ? 6 : 8)) return;
     p.lastShot = this.time;
+    p.stillFor = 0;
     const along = Math.max(0, (eye[0] - origin[0]) * dir[0] + (eye[1] - origin[1]) * dir[1] + (eye[2] - origin[2]) * dir[2]);
     const start: Vec3 = [origin[0] + dir[0] * along, origin[1] + dir[1] * along, origin[2] + dir[2] * along];
 
@@ -627,7 +669,8 @@ export class Room {
    * unless there are no hunters at all).
    */
   private fireRocket(p: Player, origin: Vec3, rawDir: Vec3) {
-    if (!p.alive || p.role !== 'prop' || p.weapon.kind !== 'rocket' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
+    const kind = p.weapon.kind;
+    if (!p.alive || p.role !== 'prop' || (kind !== 'rocket' && kind !== 'grenade') || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
     if (this.time - p.lastRocket < p.weapon.cooldown - 0.05) return;
     const len = Math.hypot(...rawDir);
     if (len < 1e-6) return;
@@ -636,6 +679,7 @@ export class Room {
     const center: Vec3 = [p.body.pos[0], p.body.pos[1] + size[1] / 2, p.body.pos[2]];
     if (Math.hypot(origin[0] - center[0], origin[1] - center[1], origin[2] - center[2]) > 8) return;
     p.lastRocket = this.time;
+    p.stillFor = 0;
     // Start on the camera ray where it passes the prop, so it flies at the crosshair.
     const along = Math.max(0, (center[0] - origin[0]) * dir[0] + (center[1] - origin[1]) * dir[1] + (center[2] - origin[2]) * dir[2]);
     const offset: Vec3 = [origin[0] + dir[0] * along - center[0], origin[1] + dir[1] * along - center[1], origin[2] + dir[2] * along - center[2]];
@@ -652,35 +696,97 @@ export class Room {
       const size = bodySize(p.role, p.prop);
       const { offset, dir } = pending;
       const pos: Vec3 = [p.body.pos[0] + offset[0], p.body.pos[1] + size[1] / 2 + offset[1], p.body.pos[2] + offset[2]];
-      const vel: Vec3 = [dir[0] * ROCKET_SPEED, dir[1] * ROCKET_SPEED, dir[2] * ROCKET_SPEED];
+      const { kind, speed, damage, knockback } = p.weapon;
+      if (kind !== 'rocket' && kind !== 'grenade') continue;
+      // Grenades get a little lift so they arc toward the crosshair.
+      const vel: Vec3 = [dir[0] * speed, dir[1] * speed + (kind === 'grenade' ? 2.5 : 0), dir[2] * speed];
       const id = this.nextRocketId++;
-      const { damage, knockback } = p.weapon;
-      this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time, damage, knockback });
+      this.rockets.set(id, { id, kind, owner: p.id, pos, vel, born: this.time, damage, knockback, bounced: false });
     }
   }
 
-  /** Flies every rocket one tick; it goes off on the first thing it touches. */
+  /**
+   * Flies every projectile one tick. A rocket goes off on the first thing it
+   * touches. A grenade falls, bounces off walls and the floor, and goes off on
+   * a player it hits before bouncing or when its fuse runs out.
+   */
   private moveRockets() {
     for (const r of this.rockets.values()) {
-      const step = ROCKET_SPEED * TICK_DT;
-      const dir: Vec3 = [r.vel[0] / ROCKET_SPEED, r.vel[1] / ROCKET_SPEED, r.vel[2] / ROCKET_SPEED];
+      const grenade = r.kind === 'grenade';
+      if (grenade) r.vel[1] -= GRENADE_GRAVITY * TICK_DT;
+      const speed = Math.hypot(...r.vel);
+      if (speed < 1e-6) {
+        if (this.time - r.born > GRENADE_FUSE) this.explode(r);
+        continue;
+      }
+      const step = speed * TICK_DT;
+      const dir: Vec3 = [r.vel[0] / speed, r.vel[1] / speed, r.vel[2] / speed];
       let t = step;
+      let wall: Box | null = null;
+      let player = false;
       for (const s of this.map.solids) {
         const d = rayBox(r.pos, dir, s);
-        if (d !== null && d < t) t = d;
+        if (d !== null && d < t) [t, wall] = [d, s];
       }
       for (const other of this.players.values()) {
         if (other.id === r.owner || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
         const d = rayBox(r.pos, dir, boxAt(other.body.pos, bodySize(other.role, other.prop)));
-        if (d !== null && d < t) t = d;
+        if (d !== null && d < t) [t, wall, player] = [d, null, true];
       }
-      if (dir[1] < 0) t = Math.min(t, -r.pos[1] / dir[1]);
+      let floor = false;
+      if (dir[1] < 0 && -r.pos[1] / dir[1] < t) [t, wall, player, floor] = [-r.pos[1] / dir[1], null, false, true];
       const hit = t < step;
       // Stop just short of the surface so the blast centre isn't inside it.
       const go = hit ? Math.max(0, t - 0.05) : step;
       r.pos = [r.pos[0] + dir[0] * go, r.pos[1] + dir[1] * go, r.pos[2] + dir[2] * go];
-      if (hit) this.explode(r);
-      else if (this.time - r.born > ROCKET_LIFETIME) this.rockets.delete(r.id);
+      if (!grenade) {
+        if (hit) this.explode(r);
+        else if (this.time - r.born > ROCKET_LIFETIME) this.rockets.delete(r.id);
+        continue;
+      }
+      if (hit && player && !r.bounced) this.explode(r);
+      else if (this.time - r.born > GRENADE_FUSE) this.explode(r);
+      else if (hit) {
+        r.bounced = true;
+        // Flip the speed along the face it struck, and lose some of it.
+        const axis = floor ? 1 : wall ? faceAxis(r.pos, wall) : 1;
+        r.vel = r.vel.map((v, i) => (i === axis ? -v : v) * GRENADE_BOUNCE) as Vec3;
+        if (axis === 1 && Math.abs(r.vel[1]) < 1) r.vel[1] = 0;
+      }
+    }
+  }
+
+  /** The charge skill: fly forward, and the first player you meet takes the hit. */
+  private useSkill(p: Player, yaw: number) {
+    const skill = p.character.skill;
+    if (!skill || !p.alive || p.role !== 'prop' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
+    if (this.time - p.lastSkill < skill.cooldown - 0.05 || p.body.charge > 0) return;
+    p.lastSkill = this.time;
+    p.stillFor = 0;
+    p.body.charge = skill.time;
+    p.body.chargeX = -Math.sin(yaw);
+    p.body.chargeZ = -Math.cos(yaw);
+  }
+
+  private chargeHit(p: Player) {
+    const skill = p.character.skill;
+    if (!skill) return;
+    const size = bodySize(p.role, p.prop);
+    // A little ahead of the body, so you hit people you run into.
+    const reach = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1], p.body.pos[2] + p.body.chargeZ * 0.3], size);
+    for (const other of this.players.values()) {
+      if (other === p || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
+      if (!overlaps(reach, boxAt(other.body.pos, bodySize(other.role, other.prop)))) continue;
+      p.body.charge = 0;
+      other.body.vx += p.body.chargeX * skill.knockback;
+      other.body.vz += p.body.chargeZ * skill.knockback;
+      other.body.vy = Math.max(other.body.vy, 0) + skill.knockback * 0.4;
+      other.body.onGround = false;
+      other.stillFor = 0;
+      const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
+      this.broadcast({ t: 'bash', from: p.id, victim: other.id, pos: [...other.body.pos] });
+      if (fighting) this.damage(other, skill.damage, p);
+      return;
     }
   }
 
@@ -716,6 +822,7 @@ export class Room {
       // Always some lift, so a shot at someone's feet throws them up.
       p.body.vy = Math.max(p.body.vy, 0) + Math.max(d[1], 0.45) * push;
       p.body.onGround = false;
+      p.stillFor = 0;
       hit.push(p.id);
       if (p.id !== r.owner && fighting) this.damage(p, Math.round(r.damage * (0.3 + 0.7 * strength)), owner);
     }

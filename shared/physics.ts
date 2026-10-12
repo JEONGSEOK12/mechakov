@@ -1,3 +1,4 @@
+import { CHARGE_SPEED } from './characters.ts';
 import {
   GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, KNOCKBACK_AIR_DRAG, KNOCKBACK_GROUND_DRAG, PROP_SPEED, SPRINT_MULT, SPRINT_SECONDS, STAMINA_REFILL_SECONDS,
   STEP_HEIGHT, WINDED_UNTIL,
@@ -18,9 +19,14 @@ export interface BodyState {
   stamina: number;
   /** Ran out of stamina and hasn't refilled to WINDED_UNTIL yet. */
   winded: boolean;
+  /** Seconds left of a charge skill, flying along (chargeX, chargeZ) instead of walking. */
+  charge: number;
+  chargeX: number;
+  chargeZ: number;
 }
 
-export const newBody = (pos: Vec3): BodyState => ({ pos, vy: 0, vx: 0, vz: 0, onGround: false, stamina: 1, winded: false });
+export const newBody = (pos: Vec3): BodyState =>
+  ({ pos, vy: 0, vx: 0, vz: 0, onGround: false, stamina: 1, winded: false, charge: 0, chargeX: 0, chargeZ: 0 });
 
 export function bodySize(role: Role, prop: string | null): Vec3 {
   if (role === 'prop' && prop) return propSize(prop);
@@ -98,7 +104,13 @@ export function stepBody(
   let mx = 0;
   let mz = 0;
   let sprinting = false;
-  if (!frozen) {
+  const charging = b.charge > 0;
+  if (charging) {
+    // Flying straight ahead; no steering or jumping until it's over.
+    mx = b.chargeX * CHARGE_SPEED * dt;
+    mz = b.chargeZ * CHARGE_SPEED * dt;
+    b.charge = Math.max(0, b.charge - dt);
+  } else if (!frozen) {
     const fwd = (keys.f ? 1 : 0) - (keys.b ? 1 : 0);
     const side = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
     const len = Math.hypot(fwd, side);
@@ -129,8 +141,11 @@ export function stepBody(
   b.vz *= drag;
   if (Math.abs(b.vx) < 0.05) b.vx = 0;
   if (Math.abs(b.vz) < 0.05) b.vz = 0;
-  if (moveHorizontal(b, size, 0, mx + b.vx * dt, solids)) b.vx = 0;
-  if (moveHorizontal(b, size, 2, mz + b.vz * dt, solids)) b.vz = 0;
+  let blocked = false;
+  if (moveHorizontal(b, size, 0, mx + b.vx * dt, solids)) [b.vx, blocked] = [0, true];
+  if (moveHorizontal(b, size, 2, mz + b.vz * dt, solids)) [b.vz, blocked] = [0, true];
+  // A charge ends against a wall.
+  if (charging && blocked) b.charge = 0;
   moveVertical(b, size, b.vy * dt, solids);
 }
 
