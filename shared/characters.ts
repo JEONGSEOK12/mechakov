@@ -99,7 +99,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'invisible',
-    weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.4, clip: 3, reload: 3, knockback: 10, speed: 17 }),
+    weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.4, clip: 3, reload: 3, knockback: 18, speed: 17 }),
     skill: { kind: 'leap', name: '돌진', cooldown: 6, chargeTime: 1, speed: [8, 20], lift: [5, 10], damage: 30, knockback: 16 },
   },
   // A stand-in to try the decoy ability until it gets a character of its own.
