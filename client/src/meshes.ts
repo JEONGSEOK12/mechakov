@@ -69,6 +69,35 @@ export function createHunterMesh(color = 0xd24b3a): THREE.Object3D {
   return g;
 }
 
+/** A straw target dummy on a post, with a target painted front and back. */
+export function createDummyMesh(): THREE.Object3D {
+  const g = new THREE.Group();
+  const straw = new THREE.MeshStandardMaterial({ color: 0xc9a85c, roughness: 0.95 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 0.9 });
+  const [w, h] = HUNTER_SIZE;
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, h, 8), wood);
+  post.position.y = h / 2;
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.08, 16), wood);
+  base.position.y = 0.04;
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(w / 2, 0.55, 4, 12), straw);
+  body.position.y = 1.05;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), straw);
+  head.position.y = 1.58;
+  const arms = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.1, 8).rotateZ(Math.PI / 2), wood);
+  arms.position.y = 1.25;
+  g.add(post, base, body, head, arms);
+  for (const side of [-1, 1]) {
+    for (const [r, color] of [[0.24, 0xf2f2f2], [0.16, 0xd8342b], [0.08, 0xf2f2f2]] as const) {
+      const ring = new THREE.Mesh(new THREE.CircleGeometry(r, 20), new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
+      ring.position.set(0, 1.05, side * (w / 2 + 0.005 + (0.24 - r) * 0.02));
+      if (side < 0) ring.rotation.y = Math.PI;
+      g.add(ring);
+    }
+  }
+  g.traverse((m) => (m.castShadow = true));
+  return g;
+}
+
 export interface World {
   /** Everything the camera and the disguise picker can hit. */
   colliders: THREE.Object3D[];
@@ -92,6 +121,7 @@ const PALETTES: Record<Theme, Palette> = {
   warehouse: { sky: 0xa9b8c6, floor: '#5a5d61', ground: '#77746d', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.6 },
   office: { sky: 0xa8c6e2, floor: '#4d5868', ground: '#8a847a', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
   yard: { sky: 0x9cc4e4, floor: '#3d3f42', ground: '#56534d', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
+  range: { sky: 0xa9c4dc, floor: '#5b6470', ground: '#5b6470', wall: 0x7d8792, inner: [0x9a8f7a], lamps: false, ambient: 2 },
   hideout: { sky: 0x17140f, floor: '#4a4036', ground: '#4a4036', wall: 0x6e6253, inner: [0x8a7a62], lamps: true, ambient: 1.6 },
 };
 
@@ -122,7 +152,7 @@ function roadMesh(map: GameMap): THREE.Object3D {
   return g;
 }
 
-const STATION_LABELS: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발' };
+const STATION_LABELS: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발', range: '연습실', leave: '은신처로' };
 
 /** A name floating over a hideout station, always facing the camera. */
 function createLabel(text: string): THREE.Sprite {

@@ -29,11 +29,14 @@ export interface GameMap {
   roads: Area[];
   /** Buildings: the client gives each a floor and a roof. */
   buildings: Building[];
-  /** Hideout only: where to stand to use the stash, the workbench and the raid door. */
-  stations?: Record<Station, Vec3>;
+  /** Hideout and range only: where to stand to use the stash, the workbench, the doors. */
+  stations?: Partial<Record<Station, Vec3>>;
+  /** Range only: where the target dummies stand, and whether each one walks side to side. */
+  dummies?: { pos: Vec3; moving: boolean }[];
 }
 
-export type Station = 'stash' | 'bench' | 'door';
+/** `range` is the hideout's door to the practice range; `leave` takes you back. */
+export type Station = 'stash' | 'bench' | 'door' | 'range' | 'leave';
 export const STATION_RANGE = 1.8;
 
 function mulberry32(seed: number) {
@@ -51,7 +54,7 @@ function mulberry32(seed: number) {
 const CLEAR_ZONE = 6;
 
 export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
-export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처' };
+export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처', range: '연습실' };
 
 /** Raid maps are 180 m across: eight areas around a middle, with roads between. */
 const HALF = 90;
@@ -442,7 +445,7 @@ function yard(b: Builder) {
   L.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'wheelbarrow'], -22, -22, 22, 22, 10);
 }
 
-const LAYOUTS: Record<Exclude<Theme, 'hideout'>, (b: Builder) => void> = { warehouse, office, yard };
+const LAYOUTS: Record<Exclude<Theme, 'hideout' | 'range'>, (b: Builder) => void> = { warehouse, office, yard };
 
 /** Invisible walls above the outer walls, so a rocket jump can't fly out of the map. */
 const skyFence = (half: number, y0: number): Box[] => {
@@ -464,6 +467,7 @@ const skyFence = (half: number, y0: number): Box[] => {
  */
 export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   if (theme === 'hideout') return hideoutMap(seed);
+  if (theme === 'range') return rangeMap(seed);
   const rand = mulberry32(seed);
   const half = HALF;
   const wallHeight = theme === 'yard' ? 4 : 6;
@@ -597,6 +601,10 @@ function hideoutMap(seed: number): GameMap {
   add('vending', [8.4, 0, -1.5], 3);
   add('coffeeTable', [-7.6, 0, 1.5], 1);
   add('chair', [-6.7, 0, 1.2], 3);
+  // The way to the practice range: an ammo crate with cones by it.
+  add('crate', [-8.4, 0, -5]);
+  add('cone', [-8.4, 0, -6.1]);
+  add('cone', [-8.4, 0, -3.9]);
 
   const door: Box = { min: [-1.5, 0, half - 2], max: [1.5, 0.2, half] };
   const spawns: Vec3[] = [[0, 0, 0], [1.5, 0, 0.5], [-1.5, 0, 0.5], [0, 0, 1.5], [1.5, 0, 2], [-1.5, 0, 2]];
@@ -616,6 +624,65 @@ function hideoutMap(seed: number): GameMap {
     zones: [{ name: '은신처', min: [-half, -half], max: [half, half] }],
     roads: [],
     buildings: [],
-    stations: { stash: [-5.1, 0, -7.4], bench: [5, 0, -7.4], door: [0, 0, half - 1] },
+    stations: { stash: [-5.1, 0, -7.4], bench: [5, 0, -7.4], door: [0, 0, half - 1], range: [-7.6, 0, -5] },
+  };
+}
+
+/**
+ * The practice range, reached from the hideout: target dummies at 5, 10, 20
+ * and 30 m from where you come in, two that walk side to side, a block to
+ * rocket jump or leap onto, low walls to shoot around, and a row of props to
+ * try disguises on.
+ */
+function rangeMap(seed: number): GameMap {
+  const half = 22;
+  const wallHeight = 5;
+  const t = 0.5;
+  const walls: Box[] = [
+    { min: [-half - t, 0, -half - t], max: [half + t, wallHeight, -half] },
+    { min: [-half - t, 0, half], max: [half + t, wallHeight, half + t] },
+    { min: [-half - t, 0, -half], max: [-half, wallHeight, half] },
+    { min: [half, 0, -half], max: [half + t, wallHeight, half] },
+    // A block to jump onto, and steps of low walls to shoot over and around.
+    { min: [12, 0, -6], max: [17, 3, -1] },
+    { min: [-15, 0, 2], max: [-11, 1.2, 2.4] },
+    { min: [-15, 0, -6], max: [-11, 2.2, -5.6] },
+    { min: [-15, 0, -14], max: [-11, 3.2, -13.6] },
+  ];
+  const props: StaticProp[] = [];
+  const propBoxes: Box[] = [];
+  const add = (type: string, pos: Vec3, rot: Rot = 0) => {
+    props.push({ id: props.length, type, pos, rot });
+    propBoxes.push(boxAt(pos, propSize(type, rot)));
+  };
+  // One of each kind of prop along the east wall, small to big.
+  const row = ['smallBox', 'bucket', 'tire', 'cone', 'crate', 'barrel', 'chair', 'plant', 'printer', 'desk', 'cabinet', 'locker', 'bookshelf', 'sofa', 'generator', 'vending'];
+  row.forEach((type, i) => add(type, [19.5, 0, 16 - i * 2.2], 3));
+  const spawns: Vec3[] = [[0, 0, 17], [1.5, 0, 17.5], [-1.5, 0, 17.5], [0, 0, 18.5], [1.5, 0, 19], [-1.5, 0, 19]];
+  return {
+    seed,
+    theme: 'range',
+    half,
+    wallHeight,
+    walls,
+    props,
+    propBoxes,
+    solids: [...walls, ...propBoxes, ...skyFence(half, wallHeight)],
+    hunterSpawns: spawns,
+    propSpawns: spawns,
+    exits: [],
+    lootSpots: [],
+    zones: [{ name: '연습실', min: [-half, -half], max: [half, half] }],
+    roads: [],
+    buildings: [],
+    stations: { leave: [0, 0, half - 1] },
+    dummies: [
+      { pos: [0, 0, 12], moving: false },
+      { pos: [0, 0, 7], moving: false },
+      { pos: [-4, 0, -3], moving: false },
+      { pos: [4, 0, -13], moving: false },
+      { pos: [-6, 0, 3], moving: true },
+      { pos: [6, 0, -6], moving: true },
+    ],
   };
 }

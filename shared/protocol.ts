@@ -32,6 +32,8 @@ export interface PlayerSnap {
   /** Body facing; differs from yaw when a prop locks its rotation. */
   face: number;
   prop: string | null;
+  /** A practice-range target dummy. */
+  dummy?: boolean;
   /** See `CHARACTERS`. */
   character: string;
   /** Last input sequence number the server applied. */
@@ -74,6 +76,8 @@ export type ClientMsg =
   | { t: 'skill'; yaw: number; power: number }
   /** The `decoy` disguise: leave a copy of yourself here. */
   | { t: 'decoy' }
+  /** Solo, between raids: go to the practice range (true) or back to the hideout. */
+  | { t: 'practice'; on: boolean }
   | { t: 'disguise'; propId: number };
 
 export interface RocketSnap {
@@ -97,6 +101,8 @@ export type ServerMsg =
   | { t: 'shot'; from: number; origin: Vec3; end: Vec3; hit: ShotHit; target?: number }
   /** A rocket went off: `hit` lists who it pushed or hurt. */
   | { t: 'boom'; from: number; pos: Vec3; hit: number[] }
+  /** To the attacker: how much a hit did, for damage numbers. `killed` when it finished off a target dummy. */
+  | { t: 'dmg'; target: number; amount: number; pos: Vec3; killed: boolean }
   /** A decoy was hit and popped. */
   | { t: 'poof'; pos: Vec3 }
   /** A leap skill ran into someone. */

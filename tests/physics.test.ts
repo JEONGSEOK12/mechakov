@@ -126,6 +126,15 @@ test('the hideout has its stations in reach', () => {
   }
 });
 
+test('the practice range: spawns, dummies and the way out are all in reach', () => {
+  const map = generateMap(1, 'range');
+  const reach = reachable(map);
+  for (const p of [...map.propSpawns, ...map.dummies!.map((d) => d.pos), map.stations!.leave!]) {
+    assert.ok(reach(p[0], p[2]), `(${p[0]}, ${p[2]}) is cut off`);
+    assert.ok(!map.solids.some((b) => overlaps(boxAt(p, [0.6, 1.8, 0.6]), b)), `(${p[0]}, ${p[2]}) is inside something`);
+  }
+});
+
 test('sprinting runs out of stamina, and you get your breath back before sprinting again', () => {
   const sprint: InputKeys = { ...forward, sprint: true };
   const speedOver = (keys: InputKeys, b: BodyState) => {

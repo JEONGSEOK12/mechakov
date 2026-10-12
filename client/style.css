@@ -120,3 +120,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #111; color:
 #mapview .k-exit { color: #3ddc84; }
 #mapview .k-wall { color: #9aa3ad; }
 #mapview .k-prop { color: #6f6656; }
+.dmg-float { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 5; font: 800 22px system-ui, sans-serif; color: #ffe35a;
+  text-shadow: 0 2px 0 #000, 0 0 6px rgba(0,0,0,0.6); white-space: nowrap; }
+.dmg-float.kill { color: #ff5a4a; font-size: 26px; }

@@ -1,7 +1,7 @@
 import { THEME_NAMES, type GameMap, type Station, type Zone } from '../../shared/map.ts';
 
 const SIZE = 900;
-const STATION_NAMES: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발' };
+const STATION_NAMES: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발', range: '연습실', leave: '은신처로' };
 
 /**
  * The full map, opened with M: walls, props, named areas and exits drawn from
