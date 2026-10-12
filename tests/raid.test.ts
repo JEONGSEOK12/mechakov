@@ -371,6 +371,8 @@ test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out
 
 test('the grenadier leaps in an arc, farther when charged, and rams whoever it lands on', () => {
   const { room, me, other } = grenadierRaid();
+  // On open ground, so nothing on the map gets in the way of the arcs.
+  room.map.solids = [];
   const leap = (power: number) => {
     me.body = { ...me.body, pos: [0, 0, 12], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
     other.body.pos = [40, 0, 0];

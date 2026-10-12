@@ -71,6 +71,7 @@ export const PROPS: Record<string, PropDef> = {
   acUnit: { name: '실외기', shape: 'box', size: [0.9, 0.75, 0.4], color: 0xd8dcd6, weight: 1, tier: 1, themes: ['yard', 'office', 'warehouse'] },
   logPile: { name: '통나무 더미', shape: 'box', size: [1.8, 0.8, 1], color: 0x8a5a33, weight: 1, tier: 2, themes: ['yard'] },
   portaPotty: { name: '간이 화장실', shape: 'box', size: [1.1, 2.3, 1.1], color: 0x2f7fd0, weight: 1, tier: 2, themes: ['yard'] },
+  van: { name: '승합차', shape: 'box', size: [2, 2.1, 4.6], color: 0xd8dde2, weight: 1, tier: 2, themes: ['warehouse', 'office', 'yard'] },
   planter: { name: '화단', shape: 'box', size: [1.6, 0.9, 0.5], color: 0x7a7468, weight: 1, tier: 1, themes: ['office', 'yard'] },
 };
 

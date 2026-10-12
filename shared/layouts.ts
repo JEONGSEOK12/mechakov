@@ -1,4 +1,4 @@
-import { boxAt, overlaps } from './geometry.ts';
+import { boxAt, overlaps, rayBox } from './geometry.ts';
 import { PROPS } from './props.ts';
 import type { Box, Vec3 } from './types.ts';
 
@@ -157,10 +157,65 @@ export class Builder {
     return out;
   }
 
-  private blocked(b: Box) {
-    const p: Box = { min: [b.min[0] - 0.15, b.min[1], b.min[2] - 0.15], max: [b.max[0] + 0.15, b.max[1], b.max[2] + 0.15] };
+  private blocked(b: Box, pad = 0.15, roads = false) {
+    const p: Box = { min: [b.min[0] - pad, b.min[1], b.min[2] - pad], max: [b.max[0] + pad, b.max[1], b.max[2] + pad] };
     if (p.min[0] < -this.half || p.max[0] > this.half || p.min[2] < -this.half || p.max[2] > this.half) return true;
-    return this.walls.some((w) => overlaps(p, w)) || this.clear.some((w) => overlaps(p, w)) || this.propBoxes.some((w) => overlaps(p, w));
+    return this.walls.some((w) => overlaps(p, w)) || (!roads && this.clear.some((w) => overlaps(p, w))) || this.propBoxes.some((w) => overlaps(p, w));
+  }
+
+  /** A vehicle left on a road: roads are otherwise kept clear, so this skips that check. */
+  vehicle(type: string, x: number, z: number, rot: Rot) {
+    const box = boxAt([x, 0, z], propSize(type, rot));
+    if (this.blocked(box, 0.15, true)) return null;
+    this.props.push({ id: this.props.length, type, pos: [x, 0, z], rot });
+    this.propBoxes.push(box);
+    return box;
+  }
+
+  /**
+   * Breaks up open ground: wherever you could see far in several directions
+   * from eye height, stands a piece of cover across the longest view.
+   * `piece` gives its size (width, depth, height) for a view running along x
+   * or along z. Leaves buildings, kept-clear areas and a walkable gap around
+   * everything else alone.
+   */
+  fillOpen(piece: (viewAlongX: boolean) => Vec3, reach: number, step = 4, eye = 1.5) {
+    const blockers = [...this.walls, ...this.propBoxes].filter((b) => b.min[1] <= eye && b.max[1] >= eye);
+    const indoors = (x: number, z: number) => this.buildings.some((b) => x > b.min[0] - 1 && x < b.max[0] + 1 && z > b.min[1] - 1 && z < b.max[1] + 1);
+    const cands: [number, number][] = [];
+    for (let x = -this.half + step; x < this.half - step / 2; x += step) for (let z = -this.half + step; z < this.half - step / 2; z += step) cands.push([x, z]);
+    for (let i = cands.length - 1; i > 0; i--) {
+      const j = Math.floor(this.rand() * (i + 1));
+      [cands[i], cands[j]] = [cands[j], cands[i]];
+    }
+    const dirs: Vec3[] = Array.from({ length: 8 }, (_, k) => [Math.cos((k * Math.PI) / 4), 0, Math.sin((k * Math.PI) / 4)]);
+    let placed = 0;
+    for (const [x, z] of cands) {
+      if (indoors(x, z)) continue;
+      const from: Vec3 = [x, eye, z];
+      if (blockers.some((b) => from[0] > b.min[0] && from[0] < b.max[0] && from[2] > b.min[2] && from[2] < b.max[2])) continue;
+      let alongX = 0;
+      let alongZ = 0;
+      for (const d of dirs) {
+        let near = Infinity;
+        for (const b of blockers) {
+          const t = rayBox(from, d, b);
+          if (t !== null && t < near) near = t;
+          if (near < reach) break;
+        }
+        if (near < reach) continue;
+        alongX += Math.abs(d[0]);
+        alongZ += Math.abs(d[2]);
+      }
+      if (alongX + alongZ < 1.9) continue;
+      const [w, d, h] = piece(alongX >= alongZ);
+      const box: Box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, h, z + d / 2] };
+      if (this.blocked(box, 1.4)) continue;
+      this.walls.push(box);
+      blockers.push(box);
+      placed++;
+    }
+    return placed;
   }
 
   /** Whether a prop would fit on the floor here. */
