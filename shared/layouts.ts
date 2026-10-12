@@ -163,6 +163,76 @@ export class Builder {
     return this.walls.some((w) => overlaps(p, w)) || this.clear.some((w) => overlaps(p, w)) || this.propBoxes.some((w) => overlaps(p, w));
   }
 
+  /** Whether a prop would fit on the floor here. */
+  fits(type: string, x: number, z: number, rot: Rot = 0, pad = 0) {
+    const size = propSize(type, rot);
+    return !this.blocked(boxAt([x, 0, z], [size[0] + pad, size[1], size[2] + pad]));
+  }
+
+  /**
+   * A blind spot: tall things set in an L, with room in the corner of the L
+   * to hide where you can't be seen from most directions, and sometimes
+   * something small already tucked in there. Placed whole or not at all.
+   */
+  nook(tall: readonly string[], hide: readonly string[], x: number, z: number): boolean {
+    const type = this.pick(tall);
+    const [w, , d] = propSize(type);
+    const sx = this.chance(0.5) ? 1 : -1;
+    const sz = this.chance(0.5) ? 1 : -1;
+    const arm = 1 + Math.floor(this.rand() * 2);
+    // The corner piece, then arms running along x (facing in) and along z.
+    const pieces: [number, number, Rot][] = [[x, z, sz > 0 ? 0 : 2]];
+    for (let i = 1; i <= arm; i++) pieces.push([x + sx * (w + 0.05) * i, z, sz > 0 ? 0 : 2]);
+    for (let i = 1; i <= arm; i++) pieces.push([x, z + sz * (d / 2 + w / 2 + 0.05 + (i - 1) * (w + 0.05)), sx > 0 ? 1 : 3]);
+    // The hiding spot: in the corner of the L, out of sight from behind it.
+    const hx = x + sx * (d / 2 + 0.8);
+    const hz = z + sz * (d / 2 + 0.8);
+    if (!pieces.every(([px, pz, r]) => this.fits(type, px, pz, r)) || !this.fits('crate', hx, hz, 0, 0.4)) return false;
+    for (const [px, pz, r] of pieces) this.dressTop(this.prop(type, px, pz, r), type);
+    if (hide.length && this.chance(0.5)) this.prop(this.pick(hide), hx + sx * 0.2, hz + sz * 0.2, Math.floor(this.rand() * 4) as Rot);
+    return true;
+  }
+
+  /**
+   * Fills in along the outer walls so the playable edge wanders instead of
+   * running straight: blocks of wall height, `seg` metres along each side,
+   * reaching in by a smoothly varying depth up to `maxDepth`. They stop short
+   * of walls, buildings and kept-clear areas (roads, exits, doorways) and
+   * clear away loose props in their way.
+   */
+  ragged(maxDepth: number, seg: number, height: number) {
+    const h = this.half;
+    const inside = (b: Box) => b.max[0] > -h && b.min[0] < h && b.max[2] > -h && b.min[2] < h;
+    const taken = [
+      ...this.walls.filter(inside),
+      ...this.clear,
+      ...this.buildings.map((b): Box => ({ min: [b.min[0], 0, b.min[1]], max: [b.max[0], b.height, b.max[1]] })),
+    ].map((b): Box => ({ min: [b.min[0] - 1.5, b.min[1], b.min[2] - 1.5], max: [b.max[0] + 1.5, b.max[1], b.max[2] + 1.5] }));
+    const outer = this.walls.length;
+    for (let side = 0; side < 4; side++) {
+      const phase = [this.rand() * 6.28, this.rand() * 6.28, this.rand() * 6.28];
+      for (let a = -h; a < h - 0.01; a += seg) {
+        const t = (a + seg / 2) / h;
+        const wave = 0.5 + 0.25 * Math.sin(t * 2.1 + phase[0]) + 0.17 * Math.sin(t * 4.7 + phase[1]) + 0.08 * Math.sin(t * 9.3 + phase[2]);
+        let depth = Math.round(Math.max(0, Math.min(1, wave)) * maxDepth);
+        const at = (dep: number): Box => {
+          const [x0, z0, x1, z1] =
+            side === 0 ? [a, -h, a + seg, -h + dep] : side === 1 ? [a, h - dep, a + seg, h] : side === 2 ? [-h, a, -h + dep, a + seg] : [h - dep, a, h, a + seg];
+          return { min: [x0, 0, z0], max: [x1, height, z1] };
+        };
+        while (depth > 0 && taken.some((b) => overlaps(at(depth), b))) depth--;
+        // Containers are drawn from 2.4 m thick walls, so steer clear of that size.
+        if (Math.abs(depth - 2.4) < 0.01) depth = 2;
+        if (depth >= 1) this.walls.push(at(depth));
+      }
+    }
+    const added = this.walls.slice(outer);
+    const keep = this.propBoxes.map((b) => !added.some((w) => overlaps(b, w)));
+    this.props = this.props.filter((_, i) => keep[i]).map((p, id) => ({ ...p, id }));
+    this.propBoxes = this.propBoxes.filter((_, i) => keep[i]);
+    return added;
+  }
+
   /** Places a prop if there's room; returns its box. */
   prop(type: string, x: number, z: number, rot: Rot = 0, y = 0): Box | null {
     const pos: Vec3 = [x, y, z];

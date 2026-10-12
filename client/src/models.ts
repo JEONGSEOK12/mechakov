@@ -603,6 +603,161 @@ const MODELS: Record<string, Model> = {
     for (let i = 0; i < 5; i++) p.box(0.05, h * 0.55, 0.02, -w * 0.3 + i * w * 0.15, 0.25, d / 2 - 0.05, shade(c, 0.85));
     p.box(0.4, 0.12, 0.006, 0, h * 0.55, d / 2 - 0.035, WHITE);
   },
+  ibcTank(p, [w, h, d], c) {
+    // A white plastic tote in a steel cage on a pallet.
+    p.box(w, 0.14, d, 0, 0, 0, DARK_STEEL);
+    p.box(w - 0.1, h - 0.24, d - 0.1, 0, 0.16, 0, c);
+    p.cyl(0.11, 0.06, 0, h - 0.08, 0, 0xd9dcd2);
+    p.box(0.12, 0.1, 0.12, 0, 0.2, d / 2 - 0.06, 0x2b2f33);
+    const bar = 0.025;
+    for (let i = 0; i <= 4; i++) {
+      const y = 0.14 + ((h - 0.16) * i) / 4;
+      for (const sz of [-1, 1]) p.box(w, bar, bar, 0, y, (sz * (d - bar)) / 2, STEEL);
+      for (const sx of [-1, 1]) p.box(bar, bar, d, (sx * (w - bar)) / 2, y, 0, STEEL);
+    }
+    for (let i = 0; i <= 4; i++) {
+      for (const sz of [-1, 1]) p.box(bar, h - 0.14, bar, -w / 2 + bar / 2 + ((w - bar) * i) / 4, 0.14, (sz * (d - bar)) / 2, STEEL);
+      for (const sx of [-1, 1]) p.box(bar, h - 0.14, bar, (sx * (w - bar)) / 2, 0.14, -d / 2 + bar / 2 + ((d - bar) * i) / 4, STEEL);
+    }
+  },
+  shelfUnit(p, [w, h, d], c) {
+    // Open steel shelving with odds and ends on each shelf.
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) p.box(0.04, h, 0.04, (sx * (w - 0.04)) / 2, 0, (sz * (d - 0.04)) / 2, c);
+    const r = rng(17);
+    const things = [0xc8a26b, 0x2f7fd0, 0xc0392b, 0xe2d6bc, 0x3a8f4e, 0x8e969c];
+    for (let i = 0; i < 4; i++) {
+      const y = 0.1 + i * ((h - 0.15) / 3.2);
+      p.box(w - 0.02, 0.025, d - 0.02, 0, y, 0, shade(c, 1.2));
+      if (i === 3) break;
+      let x = -w / 2 + 0.05;
+      while (x < w / 2 - 0.15) {
+        const bw = 0.12 + r() * 0.22;
+        const bh = 0.1 + r() * 0.25;
+        if (r() < 0.75) p.box(bw - 0.02, bh, d * (0.5 + r() * 0.3), x + bw / 2, y + 0.025, 0, things[Math.floor(r() * things.length)]);
+        x += bw;
+      }
+    }
+  },
+  boxStack(p, [w, h, d]) {
+    // Cardboard boxes stacked up a little unevenly, with tape across the tops.
+    const r = rng(23);
+    const tones = [0xc8a26b, 0xb89058, 0xd4b07a];
+    let y = 0;
+    const rows = 3;
+    for (let row = 0; row < rows; row++) {
+      const bh = h / rows;
+      const halves = row === 1 ? 1 : 2;
+      for (let k = 0; k < halves; k++) {
+        const bw = (w - 0.04) / halves - 0.02;
+        const x = halves === 1 ? 0 : (k - 0.5) * (bw + 0.02);
+        const shift = (r() - 0.5) * 0.06;
+        const bd = d - 0.04 - r() * 0.08;
+        const tone = tones[Math.floor(r() * tones.length)];
+        p.box(bw, bh - 0.01, bd, x + shift, y, shift, tone);
+        p.box(bw + 0.004, 0.01, 0.06, x + shift, y + bh - 0.012, shift, 0xd9cfa8);
+        if (r() < 0.6) p.box(bw * 0.4, bh * 0.3, 0.004, x + shift, y + bh * 0.35, shift + bd / 2, WHITE);
+      }
+      y += bh;
+    }
+  },
+  stepLadder(p, [w, h, d], c) {
+    // An A-frame ladder: steps on the front legs, braces on the back.
+    const lean = Math.atan2(d / 2 - 0.05, h);
+    const len = Math.hypot(h, d / 2 - 0.05);
+    for (const sx of [-1, 1]) {
+      p.box(0.05, len, 0.04, (sx * (w - 0.05)) / 2, 0, d / 4, c, -lean);
+      p.box(0.04, len, 0.035, (sx * (w - 0.12)) / 2, 0, -d / 4, shade(c, 0.8), lean);
+      p.box(0.06, 0.03, 0.06, (sx * (w - 0.05)) / 2, 0, d / 2 - 0.04, BLACK);
+      p.box(0.06, 0.03, 0.06, (sx * (w - 0.12)) / 2, 0, -d / 2 + 0.04, BLACK);
+    }
+    for (let i = 1; i <= 4; i++) {
+      const y = (h * i) / 5.2;
+      const z = d / 2 - 0.05 - (y / h) * (d / 2 - 0.05) - 0.02;
+      p.box(w - 0.06, 0.03, 0.1, 0, y, z, STEEL);
+    }
+    p.box(w - 0.02, 0.06, 0.2, 0, h - 0.06, 0, shade(c, 0.85));
+    p.box(w - 0.12, 0.02, 0.02, 0, h * 0.45, -d / 4 - 0.03, STEEL);
+  },
+  safe(p, [w, h, d], c) {
+    p.box(w, h, d, 0, 0, 0, c);
+    p.box(w - 0.08, h - 0.08, 0.02, 0, 0.04, d / 2, shade(c, 1.25));
+    p.lying('z', 0.07, 0.03, -0.05, h * 0.58, d / 2 + 0.02, 0xc9a74a, 20);
+    p.lying('z', 0.02, 0.05, -0.05, h * 0.58, d / 2 + 0.04, shade(c, 0.6));
+    p.box(0.03, 0.16, 0.04, w * 0.28, h * 0.5, d / 2 + 0.03, STEEL);
+    for (const sx of [-1, 1]) p.box(0.04, 0.12, 0.03, (sx * (w - 0.06)) / 2 - 0.0, h * 0.2 + (sx > 0 ? h * 0.5 : 0), d / 2 + 0.01, BLACK);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) p.box(0.06, 0.03, 0.06, (sx * (w - 0.1)) / 2, -0.0, (sz * (d - 0.1)) / 2, BLACK);
+  },
+  coatRack(p, [w, h], c) {
+    p.cyl(0.025, h - 0.05, 0, 0.05, 0, c);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      p.box(0.03, 0.03, w / 2 - 0.03, (Math.sin(a) * (w / 2 - 0.03)) / 2, 0.01, (Math.cos(a) * (w / 2 - 0.03)) / 2, c, 0, a, 0);
+    }
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      p.box(0.02, 0.02, 0.16, Math.sin(a) * 0.07, h - 0.2, Math.cos(a) * 0.07, c, -0.6, a, 0);
+    }
+    p.sphere(0.035, 0, h - 0.04, 0, shade(c, 1.2));
+    // A coat and a scarf hanging off it.
+    p.box(0.34, 0.75, 0.12, 0, h - 0.95, 0.12, 0x2c3e55);
+    p.box(0.34, 0.1, 0.18, 0, h - 0.24, 0.1, 0x2c3e55);
+    p.box(0.08, 0.5, 0.03, -0.12, h - 0.75, -0.12, 0xb03a2e);
+  },
+  armchair(p, [w, h, d], c) {
+    const dark = shade(c, 0.8);
+    p.box(w - 0.04, 0.12, d - 0.04, 0, 0.08, 0, dark);
+    p.box(w - 0.3, 0.16, d - 0.25, 0, 0.2, 0.08, shade(c, 1.1));
+    p.box(w - 0.04, h - 0.2, 0.22, 0, 0.2, -d / 2 + 0.13, c, -0.12);
+    for (const sx of [-1, 1]) p.box(0.15, 0.42, d - 0.04, (sx * (w - 0.15)) / 2, 0.18, 0, c);
+    for (const sx of [-1, 1]) p.box(0.15, 0.06, d - 0.04, (sx * (w - 0.15)) / 2, 0.58, 0.0, shade(c, 1.15));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) p.cyl(0.03, 0.08, (sx * (w - 0.12)) / 2, 0, (sz * (d - 0.12)) / 2, WOOD);
+  },
+  acUnit(p, [w, h, d], c) {
+    p.box(w, h - 0.06, d, 0, 0.06, 0, c);
+    p.ring(0.26, 0.02, -w * 0.15, h * 0.52, d / 2 + 0.005, shade(c, 0.6), 'z');
+    p.lying('z', 0.25, 0.01, -w * 0.15, h * 0.52, d / 2, 0x3a3f44, 20);
+    for (let i = 0; i < 3; i++) p.box(0.06, 0.4, 0.01, -w * 0.15, h * 0.32, d / 2 + 0.008, shade(c, 0.5), 0, 0, (i * Math.PI) / 3);
+    for (let i = 0; i < 6; i++) p.box(0.2, 0.012, 0.01, w * 0.32, h * 0.25 + i * 0.07, d / 2 + 0.004, shade(c, 0.7));
+    for (const sx of [-1, 1]) p.box(0.08, 0.06, d + 0.04, (sx * (w - 0.2)) / 2, 0, 0, DARK_STEEL);
+    p.lying('x', 0.025, 0.25, w / 2 + 0.0, h * 0.2, -d / 4, 0xb87333);
+  },
+  logPile(p, [w, h, d], c) {
+    const r = rng(31);
+    const rad = h / 5.5;
+    for (let row = 0; row < 3; row++) {
+      const n = 3 - row;
+      for (let k = 0; k < n; k++) {
+        const x = 0;
+        const z = (k - (n - 1) / 2) * rad * 2.05;
+        const y = rad + row * rad * 1.75;
+        const rr = rad * (0.9 + r() * 0.1);
+        const len = w - r() * 0.15;
+        p.lying('x', rr, len, x, y, z, shade(c, 0.9 + r() * 0.2));
+        for (const sx of [-1, 1]) p.lying('x', rr * 0.8, 0.01, (sx * len) / 2, y, z, 0xd9b07a);
+      }
+    }
+  },
+  portaPotty(p, [w, h, d], c) {
+    p.box(w, 0.08, d, 0, 0, 0, shade(c, 0.6));
+    p.box(w - 0.04, h - 0.3, d - 0.04, 0, 0.08, 0, c);
+    p.box(w + 0.02, 0.14, d + 0.02, 0, h - 0.22, 0, WHITE);
+    p.box(w - 0.1, 0.08, d - 0.1, 0, h - 0.08, 0, WHITE);
+    p.box(w - 0.3, h - 0.55, 0.03, 0, 0.18, d / 2, shade(c, 1.15));
+    p.box(0.04, 0.2, 0.04, w / 2 - 0.22, h * 0.45, d / 2 + 0.03, STEEL);
+    p.box(0.14, 0.05, 0.01, w / 2 - 0.28, h * 0.62, d / 2 + 0.02, 0x3ddc84);
+    for (let i = 0; i < 4; i++) p.box(0.25, 0.02, 0.01, 0, h * 0.68 + i * 0.04, d / 2 + 0.02, shade(c, 0.7));
+    for (const sx of [-1, 1]) p.box(0.01, h * 0.5, 0.4, (sx * w) / 2, h * 0.2, 0, shade(c, 0.9));
+  },
+  planter(p, [w, h, d], c) {
+    p.box(w, h - 0.15, d, 0, 0, 0, c);
+    p.box(w + 0.04, 0.05, d + 0.04, 0, h - 0.2, 0, shade(c, 1.2));
+    p.box(w - 0.08, 0.04, d - 0.08, 0, h - 0.18, 0, 0x4a3726);
+    const r = rng(41);
+    for (let i = 0; i < 7; i++) {
+      const x = -w / 2 + 0.15 + (i * (w - 0.3)) / 6;
+      p.blob(0.14 + r() * 0.04, 0.1 + r() * 0.05, Math.min(0.2, d / 2 - 0.04), x, h - 0.24, 0, r() < 0.5 ? 0x3c8d40 : 0x2f7a3a);
+    }
+  },
 };
 
 const geometries = new Map<string, THREE.BufferGeometry>();

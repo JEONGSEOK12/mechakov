@@ -61,6 +61,17 @@ export const PROPS: Record<string, PropDef> = {
   microwave: { name: '전자레인지', shape: 'box', size: [0.5, 0.3, 0.38], color: 0xdadfe1, weight: 1, tier: 0, themes: ['office', 'warehouse', 'yard'] },
   serverRack: { name: '서버랙', shape: 'box', size: [0.6, 2, 1], color: 0x1e2226, weight: 1, tier: 2, themes: ['office'] },
   dumpster: { name: '쓰레기 컨테이너', shape: 'box', size: [1.8, 1.3, 1], color: 0x2e6b46, weight: 1, tier: 2, themes: ['yard', 'warehouse', 'office'] },
+  ibcTank: { name: 'IBC 탱크', shape: 'box', size: [1, 1.15, 1.2], color: 0xe8eef0, weight: 1, tier: 2, themes: ['warehouse', 'yard'] },
+  shelfUnit: { name: '철제 선반', shape: 'box', size: [1, 1.8, 0.45], color: 0x6f7a82, weight: 2, tier: 2, themes: ['warehouse', 'office', 'yard'] },
+  boxStack: { name: '상자 더미', shape: 'box', size: [1, 1.5, 0.8], color: 0xc8a26b, weight: 2, tier: 2, themes: ['warehouse', 'office', 'yard'] },
+  stepLadder: { name: '접이식 사다리', shape: 'box', size: [0.55, 1.6, 0.8], color: 0xd9a321, weight: 1, tier: 1, themes: ['warehouse', 'yard', 'office'] },
+  safe: { name: '금고', shape: 'box', size: [0.6, 0.9, 0.6], color: 0x3b4148, weight: 1, tier: 1, themes: ['office', 'warehouse', 'yard'] },
+  coatRack: { name: '옷걸이', shape: 'cylinder', size: [0.5, 1.75, 0.5], color: 0x5a3d25, weight: 1, tier: 1, themes: ['office'] },
+  armchair: { name: '안락의자', shape: 'box', size: [0.85, 0.9, 0.85], color: 0x8e4b3a, weight: 1, tier: 1, themes: ['office', 'hideout'] },
+  acUnit: { name: '실외기', shape: 'box', size: [0.9, 0.75, 0.4], color: 0xd8dcd6, weight: 1, tier: 1, themes: ['yard', 'office', 'warehouse'] },
+  logPile: { name: '통나무 더미', shape: 'box', size: [1.8, 0.8, 1], color: 0x8a5a33, weight: 1, tier: 2, themes: ['yard'] },
+  portaPotty: { name: '간이 화장실', shape: 'box', size: [1.1, 2.3, 1.1], color: 0x2f7fd0, weight: 1, tier: 2, themes: ['yard'] },
+  planter: { name: '화단', shape: 'box', size: [1.6, 0.9, 0.5], color: 0x7a7468, weight: 1, tier: 1, themes: ['office', 'yard'] },
 };
 
 export const PROP_TYPES = Object.keys(PROPS);
