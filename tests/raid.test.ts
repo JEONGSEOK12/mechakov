@@ -348,6 +348,30 @@ test('the grenadier vanishes after standing still for 2 seconds', () => {
   assert.ok(!me.invisible && shown());
 });
 
+test('a rocket at someone\'s feet goes off on the floor under them and throws them up', () => {
+  const room = new Room('feet', 7, { ...timings, hunt: 60 });
+  room.map.solids = [];
+  room.map.walls = [];
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
+  other.prop = null;
+  me.body.pos = [0, 0, 8];
+  other.body.pos = [0, 0, 0];
+  let boom: Vec3 | null = null;
+  const broadcast = room.broadcast.bind(room);
+  room.broadcast = (m) => { if (m.t === 'boom') boom = m.pos; broadcast(m); };
+  // Aim at the floor just in front of their feet, inside the near-miss margin.
+  room.handle(me, { t: 'rocket', origin: [0, 1.6, 9.5], dir: [0, -1.6, 0.45 - 9.5] });
+  for (let i = 0; i < 40 && !boom; i++) {
+    other.body.pos = [0, 0, 0];
+    other.body.vx = other.body.vy = other.body.vz = 0;
+    room.tick();
+  }
+  assert.ok(boom && boom[1] < 0.1, `went off on the floor (${boom})`);
+  assert.ok(other.body.vy > Math.abs(other.body.vz) * 1.5, `thrown up more than back (${other.body.vy}, ${other.body.vz})`);
+});
+
 test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out', () => {
   const { room, me, other } = grenadierRaid();
   // A direct hit: aim level at someone close by.

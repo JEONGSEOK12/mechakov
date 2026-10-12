@@ -802,7 +802,14 @@ export class Room {
       }
       let floor = false;
       if (dir[1] < 0 && -r.pos[1] / dir[1] < t) [t, wall, player, floor] = [-r.pos[1] / dir[1], null, false, true];
-      const hit = t < step;
+      // A near miss that's about to touch the body itself, the floor or a wall
+      // goes off there instead, so a shot at someone's feet still blows up
+      // under them and throws them up rather than sideways.
+      if (player) {
+        const near = this.nearestHit(r, dir);
+        if (near !== null && near - t < PROJECTILE_HIT_PAD * 2.5) t = near;
+      }
+      const hit = t < step || player;
       // Stop just short of the surface so the blast centre isn't inside it.
       const go = hit ? Math.max(0, t - 0.05) : step;
       r.pos = [r.pos[0] + dir[0] * go, r.pos[1] + dir[1] * go, r.pos[2] + dir[2] * go];
@@ -821,6 +828,17 @@ export class Room {
         if (axis === 1 && Math.abs(r.vel[1]) < 1) r.vel[1] = 0;
       }
     }
+  }
+
+  /** How far along `dir` a projectile would touch a body, a solid or the floor, if anything. */
+  private nearestHit(r: Rocket, dir: Vec3): number | null {
+    let best = dir[1] < 0 ? -r.pos[1] / dir[1] : Infinity;
+    for (const s of this.map.solids) best = Math.min(best, rayBox(r.pos, dir, s) ?? Infinity);
+    for (const o of this.players.values()) {
+      if (o.id === r.owner || !o.alive || this.offStage(o)) continue;
+      best = Math.min(best, rayBox(r.pos, dir, boxAt(o.body.pos, bodySize(o.role, o.prop))) ?? Infinity);
+    }
+    return Number.isFinite(best) ? best : null;
   }
 
   /**
