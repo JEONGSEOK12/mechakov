@@ -22,6 +22,11 @@ export interface PlayerSnap {
   onGround: boolean;
   stamina: number;
   winded: boolean;
+  charge: number;
+  chargeX: number;
+  chargeZ: number;
+  /** Vanished by standing still (only ever sent to the player themselves). */
+  invisible: boolean;
   yaw: number;
   pitch: number;
   /** Body facing; differs from yaw when a prop locks its rotation. */
@@ -63,12 +68,15 @@ export type ClientMsg =
   | { t: 'start' }
   | { t: 'input'; seq: number; keys: InputKeys; yaw: number; pitch: number; face: number }
   | { t: 'shoot'; origin: Vec3; dir: Vec3 }
-  /** Props with a rocket character: fire an explosive rocket along the camera ray. */
+  /** Props with a rocket or grenade weapon: fire it along the camera ray. */
   | { t: 'rocket'; origin: Vec3; dir: Vec3 }
+  /** The character's right-click skill, e.g. a charge toward `yaw`. */
+  | { t: 'skill'; yaw: number }
   | { t: 'disguise'; propId: number };
 
 export interface RocketSnap {
   id: number;
+  kind: 'rocket' | 'grenade';
   pos: Vec3;
   vel: Vec3;
 }
@@ -87,6 +95,8 @@ export type ServerMsg =
   | { t: 'shot'; from: number; origin: Vec3; end: Vec3; hit: ShotHit; target?: number }
   /** A rocket went off: `hit` lists who it pushed or hurt. */
   | { t: 'boom'; from: number; pos: Vec3; hit: number[] }
+  /** A charge skill ran into someone. */
+  | { t: 'bash'; from: number; victim: number; pos: Vec3 }
   | { t: 'kill'; killer: number | null; victim: number }
   | { t: 'roundEnd'; winner: Team | null }
   | { t: 'error'; message: string };

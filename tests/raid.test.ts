@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { TICK_DT } from '../shared/constants.ts';
+import { PROPS } from '../shared/props.ts';
 import type { ServerMsg } from '../shared/protocol.ts';
 import type { Vec3 } from '../shared/types.ts';
 import type { Profile } from '../shared/upgrades.ts';
@@ -298,39 +299,90 @@ test('props can drop bag items on the floor and pick them up again', () => {
   assert.deepEqual(prop.bag, [item.type]);
 });
 
-test('characters: picked between raids, they change health, speed and weapon', () => {
-  const room = new Room('chars', 7, { ...timings, hunt: 60 });
-  const msgs: ServerMsg[] = [];
-  const me = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
-  const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
-  room.handle(me, { t: 'character', id: 'nobody' });
-  assert.equal(me.profile.character, undefined, 'unknown ids are ignored');
-  room.handle(me, { t: 'character', id: 'sniper' });
-  room.handle(other, { t: 'character', id: 'heavy' });
-  assert.equal(me.profile.character, 'sniper');
-  assert.equal(other.hp, 150, 'heavies have more health');
-  room.tick();
-  const snap = msgs.filter((m) => m.t === 'snap').at(-1)!;
-  assert.equal(snap.t === 'snap' && snap.players.find((p) => p.id === me.id)!.character, 'sniper');
+const idle = (p: Player, seq: number) =>
+  p.inputs.push({ t: 'input', seq, keys: { f: false, b: false, l: false, r: false, jump: false, sprint: false }, yaw: 0, pitch: 0, face: 0 });
 
+/** Two players in a free-for-all raid, `me` as the grenadier. */
+function grenadierRaid() {
+  const room = new Room('chars', 7, { ...timings, hunt: 60 });
+  const seen: ServerMsg[] = [];
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: (d) => seen.push(JSON.parse(d)) }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  room.handle(me, { t: 'character', id: 'grenadier' });
   for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
-  room.handle(me, { t: 'character', id: 'scout' });
-  assert.equal(me.profile.character, 'sniper', 'no switching mid-raid');
-  // A sniper can't fire rockets, but its rifle hits from far off.
-  me.body.pos = [0, 0, 10];
-  other.body.pos = [0, 0, -10];
-  room.handle(me, { t: 'rocket', origin: [0, 1, 12], dir: [0, 0, -1] });
-  assert.equal(me.pendingRocket, null);
-  room.handle(me, { t: 'shoot', origin: [0, 1.5, 13], dir: [0, 0.22 - 1.5, -23] });
-  const shot = msgs.find((m) => m.t === 'shot');
-  assert.equal(other.hp, 150 - 40, JSON.stringify(shot));
-  // Shooting at a map prop costs the sniper some health.
-  const hp = me.hp;
-  const decoy = room.map.propBoxes[0];
-  const c: Vec3 = [(decoy.min[0] + decoy.max[0]) / 2, (decoy.min[1] + decoy.max[1]) / 2, (decoy.min[2] + decoy.max[2]) / 2];
-  me.body.pos = [c[0], decoy.max[1] + 0.2, c[2] + 2.5];
-  me.lastShot = -Infinity;
-  const eye: Vec3 = [me.body.pos[0], me.body.pos[1] + 0.3, me.body.pos[2]];
-  room.handle(me, { t: 'shoot', origin: eye, dir: [c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]] });
-  assert.ok(me.hp < hp, 'hurt by shooting a decoy');
+  return { room, me, other, seen };
+}
+
+test('characters are picked between raids and decide how you hide', () => {
+  const { room, me, other } = grenadierRaid();
+  assert.equal(me.profile.character, 'grenadier');
+  room.handle(me, { t: 'character', id: 'rocketeer' });
+  assert.equal(me.profile.character, 'grenadier', 'no switching mid-raid');
+  room.handle(me, { t: 'character', id: 'nobody' });
+  assert.equal(me.profile.character, 'grenadier', 'unknown ids are ignored');
+  // The grenadier hides by going invisible, not by turning into props; the rocketeer still can.
+  const propId = room.map.props.findIndex((p) => PROPS[p.type].tier === 0 && p.type !== 'smallBox');
+  const box = room.map.propBoxes[propId];
+  for (const p of [me, other]) p.body.pos = [(box.min[0] + box.max[0]) / 2, box.max[1], box.max[2] + 1];
+  room.handle(me, { t: 'disguise', propId });
+  room.handle(other, { t: 'disguise', propId });
+  assert.equal(me.prop, 'smallBox');
+  assert.equal(other.prop, room.map.props[propId].type);
+});
+
+test('the grenadier vanishes after standing still for 2 seconds', () => {
+  const { room, me, other, seen } = grenadierRaid();
+  me.body.pos = [0, 0, 4];
+  other.body.pos = [0, 0, -4];
+  const shown = () => {
+    const snap = seen.filter((m) => m.t === 'snap').at(-1);
+    return snap?.t === 'snap' && snap.players.some((p) => p.id === me.id);
+  };
+  for (let i = 0; i < 1.5 / TICK_DT; i++) room.tick();
+  assert.ok(shown() && !me.invisible, 'still visible after 1.5 s');
+  for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
+  assert.ok(me.invisible && !shown(), 'gone from the other player\'s snapshots');
+  // Firing gives you away.
+  room.handle(me, { t: 'rocket', origin: [0, 1, 6], dir: [0, 0, -1] });
+  room.tick();
+  assert.ok(!me.invisible && shown());
+});
+
+test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out', () => {
+  const { room, me, other } = grenadierRaid();
+  // A direct hit: aim level at someone close by.
+  me.body.pos = [0, 0, 3];
+  other.body.pos = [0, 0, -1];
+  room.handle(me, { t: 'rocket', origin: [0, 0.6, 5], dir: [0, -0.05, -1] });
+  for (let i = 0; i < 20 && other.hp === 100; i++) room.tick();
+  assert.ok(other.hp < 100, `hurt by a direct hit (${other.hp})`);
+  assert.equal(room.rockets.size, 0);
+
+  // Into the floor far from anyone: it bounces, then the fuse sets it off.
+  other.body.pos = [0, 0, -40];
+  me.lastRocket = -Infinity;
+  room.handle(me, { t: 'rocket', origin: [0, 0.6, 5], dir: [0, -1, -1] });
+  for (let i = 0; i < 10; i++) room.tick();
+  const g = [...room.rockets.values()][0];
+  assert.ok(g && g.kind === 'grenade' && g.bounced, 'bounced off the floor');
+  for (let i = 0; i < 3 / TICK_DT && room.rockets.size; i++) room.tick();
+  assert.equal(room.rockets.size, 0, 'went off');
+});
+
+test('the grenadier charges forward and rams the first player in the way', () => {
+  const { room, me, other } = grenadierRaid();
+  me.body.pos = [0, 0, 6];
+  other.body.pos = [0, 0, 0];
+  me.body.onGround = other.body.onGround = true;
+  room.handle(me, { t: 'skill', yaw: 0 });
+  assert.ok(me.body.charge > 0);
+  for (let i = 0; i < 20 && other.hp === 100; i++) {
+    idle(me, i + 1);
+    room.tick();
+  }
+  assert.equal(other.hp, 70, 'took the hit');
+  assert.ok(other.body.vz < -5, 'thrown back');
+  assert.equal(me.body.charge, 0, 'the charge stops on impact');
+  room.handle(me, { t: 'skill', yaw: 0 });
+  assert.equal(me.body.charge, 0, 'and has a cooldown');
 });
