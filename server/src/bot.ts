@@ -40,8 +40,10 @@ export class BotBrain {
 
   next(room: Room, me: Player, dt: number): InputMsg {
     if (room.phase !== this.wasPhase) {
+      // Without hunters the raid starts straight in the hunt.
+      const raidStart = room.phase === 'hide' || (room.phase === 'hunt' && this.wasPhase === 'countdown');
       this.wasPhase = room.phase;
-      if (room.phase === 'hide' || room.phase === 'lobby') {
+      if (raidStart || room.phase === 'lobby') {
         this.target = null;
         this.hidePropId = null;
         this.hidden = false;

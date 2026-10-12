@@ -1,3 +1,4 @@
+import { characterOf } from './characters.ts';
 import { PROPS } from './props.ts';
 
 export type Cost = Record<string, number>;
@@ -32,7 +33,7 @@ export const UPGRADES: Record<string, UpgradeDef> = {
     costs: [{ wires: 2, battery: 1 }, { circuit: 2, watch: 1 }],
   },
   scope: {
-    name: '조준경 (헌터)',
+    name: '조준경 (저격수)',
     effects: ['헛발질 피해 5', '헛발질 피해 3', '헛발질 피해 1'],
     costs: [{ bolts: 2, wires: 1 }, { circuit: 1, battery: 2 }],
   },
@@ -44,13 +45,15 @@ export interface Profile {
   name: string;
   stash: Record<string, number>;
   upgrades: Record<string, number>;
+  /** Picked in the hideout or lobby; see `CHARACTERS`. */
+  character?: string;
 }
 
 export const level = (p: Profile, id: string) => p.upgrades[id] ?? 0;
 
 export const bagCapacity = (p: Profile) => [3, 5, 8, 12][level(p, 'bag')];
-export const speedMult = (p: Profile) => [1, 1.05, 1.1, 1.15][level(p, 'shoes')];
-export const maxHp = (p: Profile) => [100, 110, 120, 140][level(p, 'armor')];
+export const speedMult = (p: Profile) => [1, 1.05, 1.1, 1.15][level(p, 'shoes')] * characterOf(p.character).speed;
+export const maxHp = (p: Profile) => Math.round([100, 110, 120, 140][level(p, 'armor')] * characterOf(p.character).hp);
 export const missPenalty = (p: Profile) => [5, 3, 1][level(p, 'scope')];
 export const canDisguiseAs = (p: Profile, type: string) => PROPS[type].tier <= level(p, 'catalog');
 

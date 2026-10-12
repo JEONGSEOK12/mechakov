@@ -16,6 +16,9 @@ export class Controls {
   }
 
   onShoot: () => void = () => {};
+  onCharacter: () => void = () => {};
+  /** The fire button is down (for guns that keep firing while held). */
+  firing = false;
   onDisguise: () => void = () => {};
   onPickup: () => void = () => {};
   onHideout: () => void = () => {};
@@ -60,11 +63,17 @@ export class Controls {
       this.pitch = Math.max(-1.2, Math.min(0.9, this.pitch - e.movementY * SENSITIVITY));
     });
     document.addEventListener('mousedown', (e) => {
-      if (this.locked && e.button === 0) this.onShoot();
+      if (!this.locked || e.button !== 0) return;
+      this.firing = true;
+      this.onShoot();
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.firing = false;
     });
     document.addEventListener('keydown', (e) => this.key(e, true));
     document.addEventListener('keyup', (e) => this.key(e, false));
     window.addEventListener('blur', () => {
+      this.firing = false;
       for (const k of Object.keys(this.keys) as (keyof InputKeys)[]) this.keys[k] = false;
     });
   }
@@ -83,6 +92,7 @@ export class Controls {
       case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
       case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
       case 'KeyB': if (down && !e.repeat) this.onAddBot(); break;
+      case 'KeyC': if (down && !e.repeat) this.onCharacter(); break;
       case 'KeyM': if (down && !e.repeat) this.onMap(); break;
       case 'KeyN': if (down && !e.repeat) this.onMute(); break;
       case 'Tab': if (down && !e.repeat) this.onInventory(); break;

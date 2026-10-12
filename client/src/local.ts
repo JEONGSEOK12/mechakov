@@ -19,8 +19,8 @@ function loadProfile(name: string): Profile {
 
 /**
  * Solo play with no server: the same game room runs in this tab. Between raids
- * you walk around the hideout map; in raids there are no hunters for now, just
- * you and the bots as props looting and extracting. Progress is kept in this
+ * you walk around the hideout map; raids are every player for themselves, you
+ * and the bots as props looting and extracting. Progress is kept in this
  * browser.
  */
 export class LocalNet implements Connection {
@@ -32,7 +32,6 @@ export class LocalNet implements Connection {
 
   constructor() {
     this.room = new Room('solo', Math.floor(Math.random() * 1e9), DEFAULT_TIMINGS, { save: () => this.saveProfile() }, 'hideout');
-    this.room.hunters = false;
     this.room.autoStart = false;
     this.room.start();
   }

@@ -12,9 +12,10 @@ import { Room, type Player } from '../server/src/room.ts';
 
 const timings = { countdown: 0.1, hide: 0.1, hunt: 2, end: 0.1, extract: 0.5 };
 
-/** A room driven tick by tick, with two players and their received messages. */
+/** A room with the hunters team on, driven tick by tick, with two players and their received messages. */
 function setup() {
   const room = new Room('t', 7, timings);
+  room.hunters = true;
   const inbox = new Map<number, ServerMsg[]>();
   const join = (name: string, profile: Profile = { name, stash: {}, upgrades: {} }) => {
     const msgs: ServerMsg[] = [];
@@ -128,8 +129,9 @@ test('profiles survive a restart', () => {
   assert.equal(again.profile.stash.gpu, 2);
 });
 
-test('bots play props: they hide as a prop, and the person is the hunter', () => {
+test('with the hunters team on, bots play props and the person is the hunter', () => {
   const room = new Room('bots', 7, timings);
+  room.hunters = true;
   const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
   const bots = [room.addBot()!, room.addBot()!, room.addBot()!];
   for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
@@ -143,13 +145,13 @@ test('bots play props: they hide as a prop, and the person is the hunter', () =>
   assert.equal(hidden.length, 3, `${hidden.length} of 3 bots hidden`);
 });
 
-test('with hunters off, the person is a prop and can loot and extract right away', () => {
+test('by default everyone is a prop on their own: the raid starts straight away and you can extract', () => {
   const room = new Room('practice', 7, timings);
-  room.hunters = false;
-  const human = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const msgs: ServerMsg[] = [];
+  const human = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
   room.addBot();
-  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
-  assert.equal(room.phase, 'hide');
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
+  assert.equal(room.phase, 'hunt', 'no hiding phase');
   assert.ok([...room.players.values()].every((p) => p.role === 'prop'));
 
   const item = grabLoot(room, human);
@@ -157,13 +159,15 @@ test('with hunters off, the person is a prop and can loot and extract right away
   human.body.pos = [(exit.min[0] + exit.max[0]) / 2, 0, (exit.min[2] + exit.max[2]) / 2];
   room.phaseEnds = room.time + 20;
   for (let i = 0; i < 1 / TICK_DT && !human.extracted; i++) room.tick();
-  assert.ok(human.extracted, 'extracted during the hiding phase');
+  assert.ok(human.extracted, 'extracted');
   assert.equal(human.profile.stash[item.type], 1);
+  room.phaseEnds = room.time;
+  for (let i = 0; i < 3 && (room.phase as string) !== 'end'; i++) room.tick();
+  assert.deepEqual(msgs.filter((m) => m.t === 'roundEnd').at(-1), { t: 'roundEnd', winner: null }, 'no winning team');
 });
 
 test('solo: wait in the hideout, raid on a raid map, then come back', () => {
   const room = new Room('solo-lobby', 7, timings, undefined, 'hideout');
-  room.hunters = false;
   room.autoStart = false;
   const msgs: ServerMsg[] = [];
   const human = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
@@ -179,8 +183,8 @@ test('solo: wait in the hideout, raid on a raid map, then come back', () => {
   room.tick();
   assert.notEqual(room.map.theme, 'hideout', 'the raid is on a raid map');
   assert.ok(msgs.some((m) => m.t === 'map' && m.theme === room.map.theme));
-  for (let i = 0; i < 2 / TICK_DT && phase() !== 'hide'; i++) room.tick();
-  assert.equal(phase(), 'hide');
+  for (let i = 0; i < 2 / TICK_DT && phase() !== 'hunt'; i++) room.tick();
+  assert.equal(phase(), 'hunt');
 
   const exit = room.map.exits[0];
   human.body.pos = [(exit.min[0] + exit.max[0]) / 2, 0, (exit.min[2] + exit.max[2]) / 2];
@@ -229,10 +233,9 @@ test('prop rockets throw a hunter into the air and hurt them a little', () => {
 
 test('a prop can rocket jump off the floor under itself', () => {
   const room = new Room('jump', 7, timings);
-  room.hunters = false;
   const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
   room.addBot();
-  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
   me.body.pos = [0, 0, 2];
   me.body.onGround = true;
   room.handle(me, { t: 'rocket', origin: [0, 1.6, 4], dir: [0, -1.6, -2] });
@@ -247,10 +250,9 @@ test('a prop can rocket jump off the floor under itself', () => {
 
 test('props can fight each other with rockets, and a dead prop drops its loot', () => {
   const room = new Room('fight', 7, { ...timings, hunt: 60 });
-  room.hunters = false;
   const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
   const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
-  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hide'; i++) room.tick();
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
   assert.equal(other.role, 'prop');
   other.bag = ['gpu'];
   me.body.pos = [0, 0, 4];
@@ -294,4 +296,41 @@ test('props can drop bag items on the floor and pick them up again', () => {
   assert.ok(Math.hypot(dropped.pos[0] - prop.body.pos[0], dropped.pos[2] - prop.body.pos[2]) < 0.01, 'at their feet');
   room.handle(prop, { t: 'pickup', lootId: dropped.id });
   assert.deepEqual(prop.bag, [item.type]);
+});
+
+test('characters: picked between raids, they change health, speed and weapon', () => {
+  const room = new Room('chars', 7, { ...timings, hunt: 60 });
+  const msgs: ServerMsg[] = [];
+  const me = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  room.handle(me, { t: 'character', id: 'nobody' });
+  assert.equal(me.profile.character, undefined, 'unknown ids are ignored');
+  room.handle(me, { t: 'character', id: 'sniper' });
+  room.handle(other, { t: 'character', id: 'heavy' });
+  assert.equal(me.profile.character, 'sniper');
+  assert.equal(other.hp, 150, 'heavies have more health');
+  room.tick();
+  const snap = msgs.filter((m) => m.t === 'snap').at(-1)!;
+  assert.equal(snap.t === 'snap' && snap.players.find((p) => p.id === me.id)!.character, 'sniper');
+
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
+  room.handle(me, { t: 'character', id: 'scout' });
+  assert.equal(me.profile.character, 'sniper', 'no switching mid-raid');
+  // A sniper can't fire rockets, but its rifle hits from far off.
+  me.body.pos = [0, 0, 10];
+  other.body.pos = [0, 0, -10];
+  room.handle(me, { t: 'rocket', origin: [0, 1, 12], dir: [0, 0, -1] });
+  assert.equal(me.pendingRocket, null);
+  room.handle(me, { t: 'shoot', origin: [0, 1.5, 13], dir: [0, 0.22 - 1.5, -23] });
+  const shot = msgs.find((m) => m.t === 'shot');
+  assert.equal(other.hp, 150 - 40, JSON.stringify(shot));
+  // Shooting at a map prop costs the sniper some health.
+  const hp = me.hp;
+  const decoy = room.map.propBoxes[0];
+  const c: Vec3 = [(decoy.min[0] + decoy.max[0]) / 2, (decoy.min[1] + decoy.max[1]) / 2, (decoy.min[2] + decoy.max[2]) / 2];
+  me.body.pos = [c[0], decoy.max[1] + 0.2, c[2] + 2.5];
+  me.lastShot = -Infinity;
+  const eye: Vec3 = [me.body.pos[0], me.body.pos[1] + 0.3, me.body.pos[2]];
+  room.handle(me, { t: 'shoot', origin: eye, dir: [c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]] });
+  assert.ok(me.hp < hp, 'hurt by shooting a decoy');
 });

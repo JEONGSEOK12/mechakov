@@ -10,6 +10,7 @@ const timings = { countdown: 0.1, hide: 0.1, hunt: 30, end: 0.1, extract: 1 };
 
 test('hunters do not receive props hidden behind walls', () => {
   const room = new Room('los', 7, timings);
+  room.hunters = true;
   const hunterInbox: ServerMsg[] = [];
   const a = room.addPlayer({ send: (d) => hunterInbox.push(JSON.parse(d)) }, 'a', 'token-a-0123456789ab', { name: 'a', stash: {}, upgrades: {} });
   const b = room.addPlayer({ send: (d) => hunterInbox.push(JSON.parse(d)) }, 'b', 'token-b-0123456789ab', { name: 'b', stash: {}, upgrades: {} });

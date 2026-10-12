@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_COOLDOWN, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
+import { CHARACTER_IDS, CHARACTERS, characterOf } from '../../shared/characters.ts';
+import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
 import { bodySize, stepBody, type BodyState } from '../../shared/physics.ts';
@@ -90,6 +91,8 @@ export class Game {
   private lockedFace = 0;
   private lastShot = 0;
   private lastRocket = 0;
+  /** When the current raid began, for the opening tip. */
+  private raidStartedAt = 0;
   private rocketFx = new RocketFx(this.scene);
   private spectateIndex = 0;
   private inventoryOpen = false;
@@ -166,6 +169,12 @@ export class Game {
       this.renderHideout();
     };
     this.hideout.onUpgrade = (id) => this.net.send({ t: 'upgrade', id });
+    this.controls.onCharacter = () => {
+      if (this.phase !== 'lobby' && this.phase !== 'countdown') return;
+      const next = CHARACTER_IDS[(CHARACTER_IDS.indexOf(this.me?.character ?? '') + 1) % CHARACTER_IDS.length];
+      this.net.send({ t: 'character', id: next });
+      sfx.disguise();
+    };
     this.controls.onAddBot = () => {
       if (this.phase === 'lobby' || this.phase === 'countdown') this.net.send({ t: 'addBot' });
     };
@@ -205,7 +214,7 @@ export class Game {
           this.hud.hitmarker();
           sfx.hitConfirm();
         }
-        if (msg.target === this.myId || (msg.from === this.myId && msg.hit === 'decoy')) {
+        if (msg.target === this.myId || (msg.from === this.myId && msg.hit === 'decoy' && this.decoyHurts())) {
           this.hud.damaged();
           sfx.hurt();
           this.shake(0.25, 300);
@@ -352,9 +361,14 @@ export class Game {
     }
   }
 
+  private get raidElapsed() {
+    return (performance.now() - this.raidStartedAt) / 1000;
+  }
+
   private phaseSounds(from: Phase, to: Phase) {
-    if (from === 'countdown' && to === 'hide') sfx.countdown(true);
-    if (from === 'hide' && to === 'hunt') sfx.huntStart();
+    if (from === 'countdown') this.raidStartedAt = performance.now();
+    if (from === 'countdown' && (to === 'hide' || to === 'hunt')) sfx.countdown(true);
+    if (from === 'hide' && to === 'hunt' && this.huntersInRound()) sfx.huntStart();
   }
 
   private shake(amount: number, ms: number) {
@@ -370,22 +384,30 @@ export class Game {
       return;
     }
     if (me.role === 'prop') {
-      this.fireRocket();
+      const weapon = characterOf(me.character).weapon;
+      if (weapon.kind === 'rocket') this.fireRocket(weapon.cooldown);
+      else this.fireGun(weapon.cooldown);
       return;
     }
     if (me.role !== 'hunter' || this.phase !== 'hunt') return;
+    this.fireGun(FIRE_COOLDOWN);
+  }
+
+  /** Hitscan: the server traces the ray and broadcasts the shot. */
+  private fireGun(cooldown: number) {
+    if (this.phase === 'end' || this.huntersBlind()) return;
     const now = performance.now();
-    if (now - this.lastShot < FIRE_COOLDOWN * 1000) return;
+    if (now - this.lastShot < cooldown * 1000) return;
     this.lastShot = now;
     const p = this.camera.position;
     this.net.send({ t: 'shoot', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
   }
 
   /** Props fire a rocket where the crosshair points; the server decides if it's allowed. */
-  private fireRocket() {
-    if (this.phase === 'end' || (this.phase === 'hide' && !this.manualStart)) return;
+  private fireRocket(cooldown: number) {
+    if (this.phase === 'end' || this.huntersBlind()) return;
     const now = performance.now();
-    if (now - this.lastRocket < ROCKET_COOLDOWN * 1000) return;
+    if (now - this.lastRocket < cooldown * 1000) return;
     this.lastRocket = now;
     const p = this.camera.position;
     this.net.send({ t: 'rocket', origin: [p.x, p.y, p.z], dir: lookDir(this.controls.yaw, this.controls.pitch) });
@@ -394,6 +416,15 @@ export class Game {
       sfx.rocketFire();
       this.shake(0.05, 100);
     }, ROCKET_DELAY * 1000);
+  }
+
+  /** Props hold fire while hunters wait out the hiding phase. */
+  private huntersBlind() {
+    return this.phase === 'hide' && this.huntersInRound();
+  }
+
+  private huntersInRound() {
+    return [...this.roster.values()].some((p) => p.role === 'hunter');
   }
 
   private addTracer(from: Vec3, to: Vec3, color: number) {
@@ -429,6 +460,7 @@ export class Game {
   }
 
   private frame() {
+    if (this.controls.firing && this.me?.role === 'prop' && characterOf(this.me.character).weapon.auto) this.shoot();
     const now = performance.now();
     const dt = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
@@ -586,7 +618,7 @@ export class Game {
 
   private updateHud(me: PlayerSnap | undefined) {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
-    this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart);
+    this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart, !this.huntersInRound());
     this.hud.me(me, this.phase, !!this.map.stations);
     this.hud.stamina(this.body ? this.body.stamina : null, !!this.body?.winded);
     const at = this.body?.pos ?? [this.camera.position.x, 0, this.camera.position.z];
@@ -606,12 +638,12 @@ export class Game {
     const beep = this.phase === 'countdown' && left > 0 ? Math.ceil(left) : 0;
     if (beep && beep <= 3 && beep !== this.countdownBeep) sfx.countdown(false);
     this.countdownBeep = beep;
-    if (this.phase === 'end') this.hud.roundEnd(this.winner);
+    if (this.phase === 'end') this.hud.roundEnd(this.winner, this.result?.outcome ?? null);
     else if (this.phase === 'countdown') this.hud.center(`라운드 시작까지 ${Math.ceil(left)}`);
-    else if (this.phase === 'hide' && me?.role === 'prop' && me.alive) {
-      const huntersComing = [...this.roster.values()].some((p) => p.role === 'hunter');
-      if (!huntersComing) this.hud.center(left > 25 ? '아이템을 챙겨 초록 탈출구로 가세요' : '');
-      else this.hud.center(left > 5 ? '헌터가 오기 전에 숨으세요!' : `헌터 출발까지 ${Math.ceil(left)}`);
+    else if (this.phase === 'hide' && me?.role === 'prop' && me.alive && this.huntersInRound()) {
+      this.hud.center(left > 5 ? '헌터가 오기 전에 숨으세요!' : `헌터 출발까지 ${Math.ceil(left)}`);
+    } else if (me?.role === 'prop' && me.alive && !this.huntersInRound() && (this.phase === 'hide' || this.phase === 'hunt') && this.raidElapsed < 15) {
+      this.hud.center('모두가 적이에요 · 챙겨서 탈출하세요');
     }
     else this.hud.center('');
 
@@ -628,12 +660,21 @@ export class Game {
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
     if (this.disguiseLocked !== null) hints.push(`${PROPS[this.map.props[this.disguiseLocked].type].name}: 변신 도감 업그레이드 필요`);
+    if (me && me.role !== 'spectator' && (this.phase === 'lobby' || this.phase === 'countdown')) {
+      hints.push(`C: 캐릭터 변경 (${CHARACTERS[me.character]?.name ?? ''})`);
+    }
     if (!this.manualStart && (this.phase === 'lobby' || this.phase === 'countdown')) hints.push('B: 프롭 봇 추가');
     let hint = hints.join(' · ');
     if (me?.role === 'prop' && me.alive && this.faceLocked) hint += `${hint ? ' · ' : ''}방향 고정됨 (R)`;
     if (!this.controls.active && !this.hideout.open) hint = '화면을 클릭하면 조작을 시작해요';
     else if (this.controls.dragMode && !this.hideout.open && !hint) hint = '드래그해서 둘러보고, 짧게 클릭하면 사격해요';
     this.hud.hint(hint);
+  }
+
+  /** Hunters, and props with a sniper rifle, pay for shooting a map prop. */
+  private decoyHurts() {
+    const me = this.me;
+    return !!me && (me.role === 'hunter' || characterOf(me.character).weapon.decoyPenalty);
   }
 
   private canUpgradeNow() {
