@@ -1,6 +1,8 @@
 import { characterOf } from '../../shared/characters.ts';
 import { ITEMS } from '../../shared/items.ts';
+import { THEME_NAMES } from '../../shared/map.ts';
 import type { Outcome, PlayerSnap, RosterEntry } from '../../shared/protocol.ts';
+import type { Theme } from '../../shared/props.ts';
 import type { Phase, Team } from '../../shared/types.ts';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -24,15 +26,18 @@ export class Hud {
   }
 
   phase(phase: Phase, timeLeft: number, mapName: string, manualStart = false, ffa = true) {
-    const label = phase === 'lobby' && manualStart ? '다음 레이드 준비' : ffa && (phase === 'hide' || phase === 'hunt') ? '레이드' : PHASE_LABEL[phase];
+    const label = phase === 'lobby' && mapName === THEME_NAMES.range ? '자유 연습' : phase === 'lobby' && manualStart ? '다음 레이드 준비' : ffa && (phase === 'hide' || phase === 'hunt') ? '레이드' : PHASE_LABEL[phase];
     $('phase-label').textContent = `${mapName} · ${label}`;
     $('phase-timer').textContent = phase === 'lobby' ? '' : clock(timeLeft);
   }
 
-  me(me: PlayerSnap | undefined, phase: Phase, inHideout = false) {
+  me(me: PlayerSnap | undefined, phase: Phase, theme: Theme) {
     const role = $('role');
     if (!me) return;
-    if (inHideout && phase === 'lobby') {
+    if (theme === 'range') {
+      role.textContent = `연습실 · ${characterOf(me.character).name} (C로 변경) · 허수아비를 맞혀 보세요`;
+      role.style.color = '#ffd27a';
+    } else if (theme === 'hideout' && phase === 'lobby') {
       role.textContent = `은신처 · ${characterOf(me.character).name} (C로 변경) · 출구 문으로 나가면 레이드 시작`;
       role.style.color = '#ffd27a';
     } else if (phase === 'lobby' || phase === 'countdown') {

@@ -1,8 +1,8 @@
 import type { Vec3 } from './types.ts';
 
 export type PropShape = 'box' | 'cylinder' | 'cone';
-/** Raid maps, plus the hideout solo players walk around in between raids. */
-export type Theme = 'warehouse' | 'office' | 'yard' | 'hideout';
+/** Raid maps, plus the hideout solo players walk around in between raids and its practice range. */
+export type Theme = 'warehouse' | 'office' | 'yard' | 'hideout' | 'range';
 
 export interface PropDef {
   name: string;

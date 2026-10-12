@@ -42,6 +42,8 @@ export class Player {
   lastDecoy = -Infinity;
   /** Set on a decoy: the player it copies. Decoys live in `players` so everything can hit them. */
   decoyOf: Player | null = null;
+  /** Set on a practice range target dummy. */
+  dummy: { moving: boolean; lastHit: number } | null = null;
   /** A rocket winding up: where it starts relative to the prop's centre, its direction and when it leaves. */
   pendingRocket: { offset: Vec3; dir: Vec3; at: number } | null = null;
   /** Items picked up this raid; lost on death. */
@@ -65,6 +67,11 @@ export class Player {
 
   get weapon() {
     return this.character.weapon;
+  }
+
+  /** Decoys and target dummies: in `players` so attacks hit them, but not really playing. */
+  get fake() {
+    return !!this.decoyOf || !!this.dummy;
   }
 
   /** Vanished from everyone else's view by standing still. */
@@ -98,6 +105,7 @@ export class Player {
       pitch: this.pitch,
       face: this.face,
       prop: this.prop,
+      ...(this.dummy ? { dummy: true } : {}),
       character: CHARACTERS[this.profile.character ?? ''] ? this.profile.character! : CHARACTER_IDS[0],
       seq: this.seq,
     };
@@ -195,12 +203,12 @@ export class Room {
   }
 
   get humans() {
-    return [...this.players.values()].filter((p) => !p.bot && !p.decoyOf);
+    return [...this.players.values()].filter((p) => !p.bot && !p.fake);
   }
 
   /** Everyone actually playing: people and bots, not decoys. */
   get real() {
-    return [...this.players.values()].filter((p) => !p.decoyOf);
+    return [...this.players.values()].filter((p) => !p.fake);
   }
 
   start() {
@@ -280,6 +288,9 @@ export class Room {
       case 'decoy':
         this.placeDecoy(p);
         break;
+      case 'practice':
+        if (typeof msg.on === 'boolean') this.practice(p, msg.on);
+        break;
       case 'disguise':
         if (isNum(msg.propId)) this.disguise(p, msg.propId);
         break;
@@ -299,7 +310,7 @@ export class Room {
         this.addBot();
         break;
       case 'start':
-        if (this.phase === 'lobby') this.startRequested = true;
+        if (this.phase === 'lobby' && this.map.theme !== 'range') this.startRequested = true;
         break;
     }
   }
@@ -313,6 +324,7 @@ export class Room {
       if (p.bot && p.alive) p.inputs.push(p.bot.next(this, p, TICK_DT));
       // Decoys stand still, but still fall and get thrown about like anyone.
       if (p.decoyOf) p.inputs.push({ t: 'input', seq: p.seq + 1, keys: NO_KEYS, yaw: p.yaw, pitch: 0, face: p.face });
+      if (p.dummy) this.driveDummy(p);
       if (!p.alive) {
         const last = p.inputs.at(-1);
         if (last) p.seq = last.seq;
@@ -335,7 +347,7 @@ export class Room {
       const moved = Math.hypot(p.body.pos[0] - was[0], p.body.pos[1] - was[1], p.body.pos[2] - was[2]) > 0.005;
       p.stillFor = moved || p.body.charge > 0 ? 0 : p.stillFor + TICK_DT;
       if (p.body.charge > 0) this.chargeHit(p);
-      if (!p.decoyOf) this.updateExtraction(p);
+      if (!p.fake) this.updateExtraction(p);
     }
     this.launchRockets();
     this.moveRockets();
@@ -351,16 +363,16 @@ export class Room {
   private sendSnapshots() {
     const all = [...this.players.values()];
     // Bots wait off stage while the person is in their hideout.
-    const shown = this.map.theme === 'hideout' ? all.filter((p) => !p.bot) : all;
+    const shown = all.filter((p) => !this.offStage(p));
     const snaps = new Map(shown.map((p) => [p.id, p.snap(this.timings.extract)]));
-    const roster = all.filter((p) => !p.decoyOf).map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
+    const roster = all.filter((p) => !p.fake).map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
     const rockets = [...this.rockets.values()].map(({ id, kind, pos, vel }) => ({ id, kind, pos, vel }));
     const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster, rockets };
     const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
     // Invisible players are left out for everyone but themselves.
     const anyInvisible = shown.some((p) => p.invisible);
     for (const viewer of all) {
-      if (viewer.decoyOf) continue;
+      if (viewer.fake) continue;
       const hunting = viewer.role === 'hunter' && viewer.alive && (this.phase === 'hide' || this.phase === 'hunt');
       if (!hunting && !anyInvisible) {
         viewer.conn.send(everything);
@@ -411,6 +423,8 @@ export class Room {
     const expired = this.time >= this.phaseEnds;
     switch (this.phase) {
       case 'lobby':
+        // Raids start from the hideout door, not the practice range.
+        if (this.map.theme === 'range') break;
         if (count >= MIN_PLAYERS && (this.autoStart || this.startRequested)) {
           this.startRequested = false;
           // Leave the hideout for the next raid map; the countdown runs there.
@@ -554,18 +568,19 @@ export class Room {
   }
 
   private nextRaidTheme(): Theme {
-    const current = this.map.theme === 'hideout' ? this.lastRaid : this.map.theme;
+    const current = this.map.theme === 'hideout' || this.map.theme === 'range' ? this.lastRaid : this.map.theme;
     return THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
   }
 
   private changeMap(theme: Theme) {
     this.rockets.clear();
     for (const p of this.players.values()) p.pendingRocket = null;
-    if (this.map.theme !== 'hideout') this.lastRaid = this.map.theme;
+    if (this.map.theme !== 'hideout' && this.map.theme !== 'range') this.lastRaid = this.map.theme;
     this.map = generateMap(Math.floor(Math.random() * 1e9), theme);
     this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
-    this.removeDecoys();
+    for (const p of this.players.values()) if (p.fake) this.players.delete(p.id);
     for (const p of this.players.values()) this.resetForLobby(p);
+    if (theme === 'range') this.spawnDummies();
   }
 
   private disguise(p: Player, propId: number) {
@@ -679,8 +694,7 @@ export class Room {
     this.broadcast({ t: 'shot', from: p.id, origin: eye, end, hit, target: target?.id });
 
     // Props only hurt each other once the fighting has started, like rockets.
-    const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
-    if (!hunter && !fighting) return;
+    if (!hunter && !this.fighting) return;
     if (target) this.damage(target, hunter ? SHOT_DAMAGE : weapon.damage, p);
     else if (hit === 'decoy' && (hunter || weapon.decoyPenalty)) this.damage(p, missPenalty(p.profile), null);
   }
@@ -751,7 +765,7 @@ export class Room {
         if (d !== null && d < t) [t, wall] = [d, s];
       }
       for (const other of this.players.values()) {
-        if (other.id === r.owner || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
+        if (other.id === r.owner || !other.alive || this.offStage(other)) continue;
         const d = rayBox(r.pos, dir, boxAt(other.body.pos, bodySize(other.role, other.prop)));
         if (d !== null && d < t) [t, wall, player] = [d, null, true];
       }
@@ -819,6 +833,48 @@ export class Room {
     for (const p of this.players.values()) if (p.decoyOf && (!owner || p.decoyOf === owner)) this.players.delete(p.id);
   }
 
+  /**
+   * Props hurt each other in the hunt, any time in a raid without hunters,
+   * and on the practice range.
+   */
+  get fighting() {
+    return this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters) || this.map.theme === 'range';
+  }
+
+  /** Bots wait out of sight while the person is in the hideout or on the range. */
+  private offStage(p: Player) {
+    return !!p.bot && (this.map.theme === 'hideout' || this.map.theme === 'range');
+  }
+
+  /** Walks between the hideout and its practice range; solo only, between raids. */
+  private practice(p: Player, on: boolean) {
+    if (this.autoStart || this.phase !== 'lobby' || p.fake) return;
+    if (on && this.map.theme === 'hideout') this.changeMap('range');
+    else if (!on && this.map.theme === 'range') this.changeMap('hideout');
+  }
+
+  private spawnDummies() {
+    for (const { pos, moving } of this.map.dummies ?? []) {
+      const id = this.nextId++;
+      const d = new Player(id, `dummy-${id}`, { name: '허수아비', stash: {}, upgrades: {} }, { send: () => {} });
+      d.dummy = { moving, lastHit: -Infinity };
+      d.prop = null;
+      d.body = newBody([...pos]);
+      // Facing where players come in.
+      d.yaw = d.face = Math.PI;
+      this.players.set(id, d);
+    }
+  }
+
+  /** Dummies stand still or walk side to side, and heal up a few seconds after being hit. */
+  private driveDummy(p: Player) {
+    const dummy = p.dummy!;
+    const right = Math.floor(this.time / 1.6) % 2 === 0;
+    const keys = dummy.moving ? { ...NO_KEYS, l: !right, r: right } : NO_KEYS;
+    p.inputs.push({ t: 'input', seq: p.seq + 1, keys, yaw: p.yaw, pitch: 0, face: p.face });
+    if (this.time - dummy.lastHit > 3) p.hp = maxHp(p.profile);
+  }
+
   private chargeHit(p: Player) {
     const skill = p.character.skill;
     if (!skill) return;
@@ -826,7 +882,7 @@ export class Room {
     // A little ahead of and below the body, so you hit people you fly into or come down on.
     const reach = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1] - 0.6, p.body.pos[2] + p.body.chargeZ * 0.3], [size[0], size[1] + 0.6, size[2]]);
     for (const other of this.players.values()) {
-      if (other === p || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
+      if (other === p || !other.alive || this.offStage(other)) continue;
       if (!overlaps(reach, boxAt(other.body.pos, bodySize(other.role, other.prop)))) continue;
       p.body.charge = 0;
       other.body.vx += p.body.chargeX * skill.knockback;
@@ -834,9 +890,8 @@ export class Room {
       other.body.vy = Math.max(other.body.vy, 0) + skill.knockback * 0.4;
       other.body.onGround = false;
       other.stillFor = 0;
-      const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
       this.broadcast({ t: 'bash', from: p.id, victim: other.id, pos: [...other.body.pos] });
-      if (fighting) this.damage(other, skill.damage, p);
+      if (this.fighting) this.damage(other, skill.damage, p);
       return;
     }
   }
@@ -850,10 +905,9 @@ export class Room {
     this.rockets.delete(r.id);
     const owner = this.players.get(r.owner) ?? null;
     const hit: number[] = [];
-    // Same as when props may fire: the hunt, or any time in a raid without hunters.
-    const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
+    const fighting = this.fighting;
     for (const p of this.players.values()) {
-      if (!p.alive || (p.bot && this.map.theme === 'hideout')) continue;
+      if (!p.alive || this.offStage(p)) continue;
       const size = bodySize(p.role, p.prop);
       const box = boxAt(p.body.pos, size);
       const dist = pointBoxDistance(r.pos, box);
@@ -881,6 +935,20 @@ export class Room {
   }
 
   private damage(victim: Player, amount: number, killer: Player | null) {
+    if (killer && killer !== victim) {
+      const killed = !victim.decoyOf && victim.hp <= amount;
+      this.send(killer, { t: 'dmg', target: victim.id, amount: Math.min(amount, victim.hp), pos: [...victim.body.pos], killed });
+    }
+    // A target dummy takes the hit, and starts over when it would have died.
+    if (victim.dummy) {
+      victim.dummy.lastHit = this.time;
+      victim.hp -= amount;
+      if (victim.hp <= 0) {
+        victim.hp = maxHp(victim.profile);
+        this.broadcast({ t: 'poof', pos: [...victim.body.pos] });
+      }
+      return;
+    }
     // A decoy pops at the first hit.
     if (victim.decoyOf) {
       this.players.delete(victim.id);

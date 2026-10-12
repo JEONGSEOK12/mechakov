@@ -438,3 +438,38 @@ test('a decoy looks like the player to everyone else and pops at the first hit',
   assert.ok(!seen.some((m) => m.t === 'kill'));
   assert.equal(room.phase, 'hunt');
 });
+
+test('solo: the practice range has dummies that take hits and stand back up', () => {
+  const room = new Room('solo-range', 7, timings, undefined, 'hideout');
+  room.autoStart = false;
+  const msgs: ServerMsg[] = [];
+  const me = room.addPlayer({ send: (d) => msgs.push(JSON.parse(d)) }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  room.handle(me, { t: 'practice', on: true });
+  room.tick();
+  assert.equal(room.map.theme, 'range');
+  const dummies = [...room.players.values()].filter((p) => p.dummy);
+  assert.ok(dummies.length >= 4, 'dummies stand in the range');
+  assert.equal(room.humans.length, 1, 'dummies are not counted as players');
+
+  // A rocket at the nearest dummy hurts it and tells the shooter how much.
+  const dummy = dummies.reduce((a, b) => (Math.hypot(...a.body.pos.map((v, i) => v - me.body.pos[i])) < Math.hypot(...b.body.pos.map((v, i) => v - me.body.pos[i])) ? a : b));
+  const origin: Vec3 = [me.body.pos[0], 1.6, me.body.pos[2]];
+  const target = dummy.body.pos;
+  room.handle(me, { t: 'rocket', origin, dir: [target[0] - origin[0], target[1] + 0.8 - origin[1], target[2] - origin[2]] });
+  for (let i = 0; i < 2 / TICK_DT && !msgs.some((m) => m.t === 'dmg'); i++) room.tick();
+  const dmg = msgs.find((m) => m.t === 'dmg');
+  assert.ok(dmg && dmg.t === 'dmg' && dmg.target === dummy.id && dmg.amount > 0);
+  assert.ok(dummy.hp < 100, 'the dummy is hurt');
+  for (let i = 0; i < 4 / TICK_DT; i++) room.tick();
+  assert.equal(dummy.hp, 100, 'it heals after a while');
+
+  // No raid starts from the range, and leaving goes back to the hideout.
+  room.handle(me, { t: 'start' });
+  for (let i = 0; i < 1 / TICK_DT; i++) room.tick();
+  assert.equal(room.phase, 'lobby');
+  assert.equal(room.map.theme, 'range');
+  room.handle(me, { t: 'practice', on: false });
+  room.tick();
+  assert.equal(room.map.theme, 'hideout');
+  assert.ok(![...room.players.values()].some((p) => p.dummy), 'dummies are gone');
+});

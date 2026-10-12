@@ -12,7 +12,7 @@ import type { Phase, Team, Vec3 } from '../../shared/types.ts';
 import { Controls } from './controls.ts';
 import { Hideout } from './hideout.ts';
 import { Hud } from './hud.ts';
-import { buildWorld, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
+import { buildWorld, createDummyMesh, createHunterMesh, createLootMesh, createPropMesh, type World } from './meshes.ts';
 import type { Connection } from './net.ts';
 import { MapView } from './mapview.ts';
 import { RocketFx } from './rockets.ts';
@@ -32,13 +32,14 @@ class Avatar {
   private look = '';
   private ghost = false;
 
-  setLook(role: PlayerSnap['role'], prop: string | null) {
-    const look = role === 'prop' ? `prop:${prop}` : role;
+  setLook(role: PlayerSnap['role'], prop: string | null, dummy = false) {
+    const look = dummy ? 'dummy' : role === 'prop' ? `prop:${prop}` : role;
     if (look === this.look) return;
     this.look = look;
     this.ghost = false;
     this.group.clear();
-    if (role === 'prop' && prop) this.group.add(createPropMesh(prop));
+    if (dummy) this.group.add(createDummyMesh());
+    else if (role === 'prop' && prop) this.group.add(createPropMesh(prop));
     else if (role === 'hunter') this.group.add(createHunterMesh());
   }
 
@@ -70,7 +71,7 @@ function lerpAngle(a: number, b: number, t: number) {
 
 const upgradeCount = (p: Profile) => Object.values(p.upgrades).reduce((a, b) => a + b, 0);
 
-const STATION_HINTS: Record<Station, string> = { stash: 'F: 보관함 열기', bench: 'F: 작업대에서 업그레이드', door: 'F: 레이드 출발' };
+const STATION_HINTS: Record<Station, string> = { stash: 'F: 보관함 열기', bench: 'F: 작업대에서 업그레이드', door: 'F: 레이드 출발', range: 'F: 연습실 가기', leave: 'F: 은신처로 돌아가기' };
 
 export class Game {
   private renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -112,6 +113,8 @@ export class Game {
   private lastShot = 0;
   private lastRocket = 0;
   private lastSkill = -Infinity;
+  /** Damage numbers floating up from where your hits landed. */
+  private floats: { el: HTMLElement; pos: THREE.Vector3; born: number }[] = [];
   /** When the skill button went down, while it's held and charging. */
   private skillHeldSince: number | null = null;
   private lastDecoy = -Infinity;
@@ -252,6 +255,9 @@ export class Game {
           sfx.hurt();
           this.shake(0.25, 300);
         }
+        break;
+      case 'dmg':
+        this.floatDamage(msg.pos, msg.killed ? `${msg.amount} 처치!` : `${msg.amount}`, msg.killed);
         break;
       case 'poof':
         this.rocketFx.poof(msg.pos);
@@ -425,6 +431,32 @@ export class Game {
     if (from === 'hide' && to === 'hunt' && this.huntersInRound()) sfx.huntStart();
   }
 
+  private floatDamage(pos: Vec3, text: string, killed: boolean) {
+    const el = document.createElement('div');
+    el.className = killed ? 'dmg-float kill' : 'dmg-float';
+    el.textContent = text;
+    document.body.appendChild(el);
+    const at = new THREE.Vector3(pos[0] + (Math.random() - 0.5) * 0.4, pos[1] + 1.9, pos[2] + (Math.random() - 0.5) * 0.4);
+    this.floats.push({ el, pos: at, born: performance.now() });
+  }
+
+  private updateFloats(now: number) {
+    const v = new THREE.Vector3();
+    this.floats = this.floats.filter((f) => {
+      const age = (now - f.born) / 1000;
+      if (age > 1) {
+        f.el.remove();
+        return false;
+      }
+      v.copy(f.pos).setY(f.pos.y + age * 0.8).project(this.camera);
+      const behind = v.z > 1;
+      f.el.style.display = behind ? 'none' : '';
+      f.el.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px) translate(-50%, -50%)`;
+      f.el.style.opacity = String(Math.min(1, 2.5 * (1 - age)));
+      return true;
+    });
+  }
+
   private shake(amount: number, ms: number) {
     this.shakeAmount = Math.max(this.shakeAmount, amount);
     this.shakeUntil = Math.max(this.shakeUntil, performance.now() + ms);
@@ -550,6 +582,7 @@ export class Game {
     const now = performance.now();
     const dt = Math.min(0.25, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
+    this.updateFloats(now);
     this.acc += dt;
     while (this.acc >= TICK_DT) {
       this.acc -= TICK_DT;
@@ -589,7 +622,7 @@ export class Game {
       avatar.group.visible = visible;
       if (!visible) continue;
       const isMe = p.id === this.myId && me;
-      avatar.setLook(isMe ? me.role : p.role, isMe ? me.prop : p.prop);
+      avatar.setLook(isMe ? me.role : p.role, isMe ? me.prop : p.prop, !!p.dummy);
       avatar.setGhost(!!isMe && me.invisible);
       if (isMe && myPos) {
         avatar.group.position.copy(myPos);
@@ -706,7 +739,7 @@ export class Game {
   private updateHud(me: PlayerSnap | undefined) {
     const left = Math.max(0, this.timeLeft - (performance.now() - this.timeAt) / 1000);
     this.hud.phase(this.phase, left, THEME_NAMES[this.map.theme], this.manualStart, !this.huntersInRound());
-    this.hud.me(me, this.phase, !!this.map.stations);
+    this.hud.me(me, this.phase, this.map.theme);
     this.hud.stamina(this.body ? this.body.stamina : null, !!this.body?.winded);
     const at = this.body?.pos ?? [this.camera.position.x, 0, this.camera.position.z];
     const zone = this.map.theme === 'hideout' ? null : zoneAt(this.map, at[0], at[2]);
@@ -715,7 +748,7 @@ export class Game {
     this.hud.inventory(this.inventoryOpen, {
       bag: this.bag,
       capacity: this.bagCapacity,
-      stash: this.map.stations ? this.profile.stash : null,
+      stash: this.map.theme === 'hideout' ? this.profile.stash : null,
       players: [...this.roster.values()],
       visible: this.latest,
       myId: this.myId,
@@ -737,7 +770,7 @@ export class Game {
     const inRaid = !!me?.alive && me.role !== 'spectator' && (this.phase === 'hide' || this.phase === 'hunt');
     this.hud.bag(this.bag, this.bagCapacity, inRaid);
     this.hud.extract(me?.alive ? me.extracting : 0);
-    this.hud.result(this.phase === 'lobby' && !this.map.stations ? null : this.result?.outcome ?? null, this.result?.items ?? []);
+    this.hud.result(this.phase === 'lobby' && this.map.theme !== 'hideout' ? null : this.result?.outcome ?? null, this.result?.items ?? []);
 
     const hints: string[] = [];
     if (this.station && this.pickupTarget === null) hints.push(STATION_HINTS[this.station]);
@@ -745,7 +778,7 @@ export class Game {
       const name = ITEMS[this.loot.get(this.pickupTarget)!.data.type].name;
       hints.push(this.bag.length >= this.bagCapacity ? `가방이 가득 찼어요 (${name})` : `F: ${name} 줍기`);
     }
-    if (me?.alive && me.role === 'prop' && !this.map.stations) {
+    if (me?.alive && me.role === 'prop' && this.map.theme !== 'hideout') {
       const char = characterOf(me.character);
       if (char.disguise === 'invisible') hints.push(me.invisible ? '투명 상태 (움직이거나 공격하면 풀려요)' : '가만히 2초 있으면 투명');
       if (char.disguise === 'decoy') {
@@ -820,9 +853,9 @@ export class Game {
   }
 
   private useStation(station: Station) {
-    if (station === 'door') {
+    if (station === 'door' || station === 'range' || station === 'leave') {
       this.hideout.toggle(false);
-      this.net.send({ t: 'start' });
+      this.net.send(station === 'door' ? { t: 'start' } : { t: 'practice', on: station === 'range' });
       return;
     }
     sfx.open();
