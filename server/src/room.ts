@@ -3,7 +3,7 @@ import {
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
   GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
-import { CHARACTER_IDS, CHARACTERS, characterOf, INVISIBLE_AFTER } from '../../shared/characters.ts';
+import { CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
@@ -39,6 +39,9 @@ export class Player {
   lastSkill = -Infinity;
   /** Seconds without moving or attacking, for the `invisible` disguise. */
   stillFor = 0;
+  lastDecoy = -Infinity;
+  /** Set on a decoy: the player it copies. Decoys live in `players` so everything can hit them. */
+  decoyOf: Player | null = null;
   /** A rocket winding up: where it starts relative to the prop's centre, its direction and when it leaves. */
   pendingRocket: { offset: Vec3; dir: Vec3; at: number } | null = null;
   /** Items picked up this raid; lost on death. */
@@ -110,6 +113,8 @@ function validKeys(k: unknown): k is InputKeys {
   const o = k as Record<string, unknown>;
   return ['f', 'b', 'l', 'r', 'jump', 'sprint'].every((key) => isBool(o[key]));
 }
+
+const NO_KEYS: InputKeys = { f: false, b: false, l: false, r: false, jump: false, sprint: false };
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -190,7 +195,12 @@ export class Room {
   }
 
   get humans() {
-    return [...this.players.values()].filter((p) => !p.bot);
+    return [...this.players.values()].filter((p) => !p.bot && !p.decoyOf);
+  }
+
+  /** Everyone actually playing: people and bots, not decoys. */
+  get real() {
+    return [...this.players.values()].filter((p) => !p.decoyOf);
   }
 
   start() {
@@ -203,7 +213,7 @@ export class Room {
   }
 
   get full() {
-    return this.players.size >= MAX_PLAYERS;
+    return this.real.length >= MAX_PLAYERS;
   }
 
   addPlayer(conn: Conn, rawName: unknown, token: string, profile: Profile): Player {
@@ -246,7 +256,9 @@ export class Room {
   }
 
   removePlayer(id: number) {
+    const p = this.players.get(id);
     this.players.delete(id);
+    if (p) this.removeDecoys(p);
   }
 
   handle(p: Player, msg: ClientMsg) {
@@ -263,7 +275,10 @@ export class Room {
         if (isVec3(msg.origin) && isVec3(msg.dir)) this.fireRocket(p, msg.origin, msg.dir);
         break;
       case 'skill':
-        if (isNum(msg.yaw)) this.useSkill(p, msg.yaw);
+        if (isNum(msg.yaw) && isNum(msg.power)) this.useSkill(p, msg.yaw, Math.max(0, Math.min(1, msg.power)));
+        break;
+      case 'decoy':
+        this.placeDecoy(p);
         break;
       case 'disguise':
         if (isNum(msg.propId)) this.disguise(p, msg.propId);
@@ -296,6 +311,8 @@ export class Room {
     const frozenHunters = this.phase === 'hide';
     for (const p of this.players.values()) {
       if (p.bot && p.alive) p.inputs.push(p.bot.next(this, p, TICK_DT));
+      // Decoys stand still, but still fall and get thrown about like anyone.
+      if (p.decoyOf) p.inputs.push({ t: 'input', seq: p.seq + 1, keys: NO_KEYS, yaw: p.yaw, pitch: 0, face: p.face });
       if (!p.alive) {
         const last = p.inputs.at(-1);
         if (last) p.seq = last.seq;
@@ -318,7 +335,7 @@ export class Room {
       const moved = Math.hypot(p.body.pos[0] - was[0], p.body.pos[1] - was[1], p.body.pos[2] - was[2]) > 0.005;
       p.stillFor = moved || p.body.charge > 0 ? 0 : p.stillFor + TICK_DT;
       if (p.body.charge > 0) this.chargeHit(p);
-      this.updateExtraction(p);
+      if (!p.decoyOf) this.updateExtraction(p);
     }
     this.launchRockets();
     this.moveRockets();
@@ -336,13 +353,14 @@ export class Room {
     // Bots wait off stage while the person is in their hideout.
     const shown = this.map.theme === 'hideout' ? all.filter((p) => !p.bot) : all;
     const snaps = new Map(shown.map((p) => [p.id, p.snap(this.timings.extract)]));
-    const roster = all.map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
+    const roster = all.filter((p) => !p.decoyOf).map((p) => ({ id: p.id, name: p.name, role: p.role, alive: p.alive, extracted: p.extracted }));
     const rockets = [...this.rockets.values()].map(({ id, kind, pos, vel }) => ({ id, kind, pos, vel }));
     const base = { t: 'snap' as const, time: this.time, phase: this.phase, timeLeft: Math.max(0, this.phaseEnds - this.time), roster, rockets };
     const everything = JSON.stringify({ ...base, players: [...snaps.values()] });
     // Invisible players are left out for everyone but themselves.
     const anyInvisible = shown.some((p) => p.invisible);
     for (const viewer of all) {
+      if (viewer.decoyOf) continue;
       const hunting = viewer.role === 'hunter' && viewer.alive && (this.phase === 'hide' || this.phase === 'hunt');
       if (!hunting && !anyInvisible) {
         viewer.conn.send(everything);
@@ -383,12 +401,13 @@ export class Room {
     if (p.extractTime >= this.timings.extract) {
       p.extracted = true;
       p.alive = false;
+      this.removeDecoys(p);
       this.finishRaid(p, 'extracted');
     }
   }
 
   private updatePhase() {
-    const count = this.players.size;
+    const count = this.real.length;
     const expired = this.time >= this.phaseEnds;
     switch (this.phase) {
       case 'lobby':
@@ -405,7 +424,7 @@ export class Room {
         break;
       case 'hide':
       case 'hunt': {
-        const living = (role: Role) => [...this.players.values()].filter((p) => p.role === role && p.alive).length;
+        const living = (role: Role) => this.real.filter((p) => p.role === role && p.alive).length;
         if (living('prop') === 0) this.endRound('noProps');
         else if (this.hunters && living('hunter') === 0) this.endRound('noHunters');
         // Nobody to wait for once the people are out; bots still in the raid go missing.
@@ -460,6 +479,7 @@ export class Room {
   }
 
   private startRound() {
+    this.removeDecoys();
     // Bots only play props, so hunters come from the people in the room.
     const all = [...shuffle(this.humans), ...shuffle([...this.players.values()].filter((p) => p.bot))];
     const hunterCount = !this.hunters ? 0 : Math.min(this.humans.length, Math.max(1, Math.round(all.length / 4)));
@@ -506,6 +526,7 @@ export class Room {
   }
 
   private endRound(reason: 'noProps' | 'noHunters' | 'time') {
+    this.removeDecoys();
     for (const p of this.players.values()) {
       if (!p.inRound || p.outcome) continue;
       if (!p.alive) this.finishRaid(p, 'died');
@@ -543,6 +564,7 @@ export class Room {
     if (this.map.theme !== 'hideout') this.lastRaid = this.map.theme;
     this.map = generateMap(Math.floor(Math.random() * 1e9), theme);
     this.broadcast({ t: 'map', seed: this.map.seed, theme: this.map.theme });
+    this.removeDecoys();
     for (const p of this.players.values()) this.resetForLobby(p);
   }
 
@@ -756,24 +778,53 @@ export class Room {
     }
   }
 
-  /** The charge skill: fly forward, and the first player you meet takes the hit. */
-  private useSkill(p: Player, yaw: number) {
+  /**
+   * The leap skill: throw yourself in an arc toward `yaw`, farther the longer
+   * it was charged, and the first player you meet before landing takes the hit.
+   */
+  private useSkill(p: Player, yaw: number, power: number) {
     const skill = p.character.skill;
-    if (!skill || !p.alive || p.role !== 'prop' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
+    if (!skill || !p.alive || p.role !== 'prop' || p.decoyOf || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
     if (this.time - p.lastSkill < skill.cooldown - 0.05 || p.body.charge > 0) return;
     p.lastSkill = this.time;
     p.stillFor = 0;
-    p.body.charge = skill.time;
-    p.body.chargeX = -Math.sin(yaw);
-    p.body.chargeZ = -Math.cos(yaw);
+    const speed = skill.speed[0] + (skill.speed[1] - skill.speed[0]) * power;
+    const lift = skill.lift[0] + (skill.lift[1] - skill.lift[0]) * power;
+    const b = p.body;
+    [b.chargeX, b.chargeZ] = [-Math.sin(yaw), -Math.cos(yaw)];
+    [b.vx, b.vz, b.vy] = [b.chargeX * speed, b.chargeZ * speed, lift];
+    b.onGround = false;
+    b.charge = 3;
+  }
+
+  /** The `decoy` disguise: a copy of the player that stands where they were, one at a time. */
+  private placeDecoy(p: Player) {
+    if (!p.alive || p.role !== 'prop' || p.decoyOf || p.character.disguise !== 'decoy' || this.phase === 'end') return;
+    if (this.time - p.lastDecoy < DECOY_COOLDOWN - 0.05) return;
+    p.lastDecoy = this.time;
+    this.removeDecoys(p);
+    const id = this.nextId++;
+    const profile: Profile = { name: p.name, stash: {}, upgrades: { ...p.profile.upgrades }, character: p.profile.character };
+    const d = new Player(id, `decoy-${id}`, profile, { send: () => {} });
+    d.decoyOf = p;
+    d.prop = p.prop;
+    d.hp = p.hp;
+    d.body = { ...p.body, pos: [...p.body.pos], charge: 0, vx: 0, vz: 0 };
+    [d.yaw, d.face, d.pitch] = [p.yaw, p.face, p.pitch];
+    this.players.set(id, d);
+  }
+
+  /** Takes away one player's decoy, or every decoy. */
+  private removeDecoys(owner?: Player) {
+    for (const p of this.players.values()) if (p.decoyOf && (!owner || p.decoyOf === owner)) this.players.delete(p.id);
   }
 
   private chargeHit(p: Player) {
     const skill = p.character.skill;
     if (!skill) return;
     const size = bodySize(p.role, p.prop);
-    // A little ahead of the body, so you hit people you run into.
-    const reach = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1], p.body.pos[2] + p.body.chargeZ * 0.3], size);
+    // A little ahead of and below the body, so you hit people you fly into or come down on.
+    const reach = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1] - 0.6, p.body.pos[2] + p.body.chargeZ * 0.3], [size[0], size[1] + 0.6, size[2]]);
     for (const other of this.players.values()) {
       if (other === p || !other.alive || (other.bot && this.map.theme === 'hideout')) continue;
       if (!overlaps(reach, boxAt(other.body.pos, bodySize(other.role, other.prop)))) continue;
@@ -830,9 +881,16 @@ export class Room {
   }
 
   private damage(victim: Player, amount: number, killer: Player | null) {
+    // A decoy pops at the first hit.
+    if (victim.decoyOf) {
+      this.players.delete(victim.id);
+      this.broadcast({ t: 'poof', pos: [...victim.body.pos] });
+      return;
+    }
     victim.hp = Math.max(0, victim.hp - amount);
     if (victim.hp > 0) return;
     victim.alive = false;
+    this.removeDecoys(victim);
     // Hunters can't pick things up, so one who kills takes what the prop
     // carried, plus a small bounty, as far as their bag allows. Anything
     // else falls to the floor for whoever gets there first.

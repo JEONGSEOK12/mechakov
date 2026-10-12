@@ -369,20 +369,72 @@ test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out
   assert.equal(room.rockets.size, 0, 'went off');
 });
 
-test('the grenadier charges forward and rams the first player in the way', () => {
+test('the grenadier leaps in an arc, farther when charged, and rams whoever it lands on', () => {
   const { room, me, other } = grenadierRaid();
-  me.body.pos = [0, 0, 6];
-  other.body.pos = [0, 0, 0];
-  me.body.onGround = other.body.onGround = true;
-  room.handle(me, { t: 'skill', yaw: 0 });
-  assert.ok(me.body.charge > 0);
-  for (let i = 0; i < 20 && other.hp === 100; i++) {
+  const leap = (power: number) => {
+    me.body = { ...me.body, pos: [0, 0, 12], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
+    other.body.pos = [40, 0, 0];
+    me.lastSkill = -Infinity;
+    room.handle(me, { t: 'skill', yaw: 0, power });
+    let top = 0;
+    for (let i = 0; i < 3 / TICK_DT && me.body.charge > 0; i++) {
+      idle(me, i + 1);
+      room.tick();
+      top = Math.max(top, me.body.pos[1]);
+    }
+    return { top, dist: 12 - me.body.pos[2] };
+  };
+  const short = leap(0);
+  const long = leap(1);
+  assert.ok(short.top > 0.4 && long.top > short.top, `an arc, higher when charged (${short.top.toFixed(1)} / ${long.top.toFixed(1)} m)`);
+  assert.ok(long.dist > short.dist * 2, `farther when charged (${short.dist.toFixed(1)} / ${long.dist.toFixed(1)} m)`);
+
+  me.body = { ...me.body, pos: [0, 0, 6], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
+  other.body.pos = [0, 0, 3];
+  me.lastSkill = -Infinity;
+  room.handle(me, { t: 'skill', yaw: 0, power: 0 });
+  for (let i = 0; i < 40 && other.hp === 100; i++) {
     idle(me, i + 1);
     room.tick();
   }
   assert.equal(other.hp, 70, 'took the hit');
   assert.ok(other.body.vz < -5, 'thrown back');
-  assert.equal(me.body.charge, 0, 'the charge stops on impact');
-  room.handle(me, { t: 'skill', yaw: 0 });
+  assert.equal(me.body.charge, 0, 'the leap stops on impact');
+  room.handle(me, { t: 'skill', yaw: 0, power: 1 });
   assert.equal(me.body.charge, 0, 'and has a cooldown');
+});
+
+test('a decoy looks like the player to everyone else and pops at the first hit', () => {
+  const room = new Room('decoy', 7, { ...timings, hunt: 60 });
+  const seen: ServerMsg[] = [];
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: (d) => seen.push(JSON.parse(d)) }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  room.handle(me, { t: 'character', id: 'decoyTest' });
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
+  me.body.pos = [0, 0, 4];
+  other.body.pos = [0, 0, -4];
+  room.handle(me, { t: 'decoy' });
+  room.handle(other, { t: 'decoy' });
+  const decoys = () => [...room.players.values()].filter((p) => p.decoyOf);
+  assert.equal(decoys().length, 1, 'only characters with the decoy ability');
+  me.body.pos = [10, 0, 4];
+  room.tick();
+  const snap = seen.filter((m) => m.t === 'snap').at(-1)!;
+  assert.ok(snap.t === 'snap');
+  const copy = snap.players.find((p) => p.id === decoys()[0].id)!;
+  const real = snap.players.find((p) => p.id === me.id)!;
+  assert.equal(copy.name, real.name);
+  assert.equal(copy.character, real.character);
+  assert.deepEqual(copy.pos, [0, 0, 4], 'stays where it was left');
+  assert.ok(!snap.roster.some((r) => r.id === copy.id), 'not listed as a player');
+
+  room.handle(me, { t: 'decoy' });
+  assert.equal(decoys().length, 1, 'one at a time, with a cooldown');
+  // One rocket pops it, without killing anyone or ending the raid.
+  room.handle(other, { t: 'rocket', origin: [0, 0.3, -2], dir: [0, 0, 1] });
+  for (let i = 0; i < 20 && decoys().length; i++) room.tick();
+  assert.equal(decoys().length, 0, 'popped');
+  assert.ok(seen.some((m) => m.t === 'poof'));
+  assert.ok(!seen.some((m) => m.t === 'kill'));
+  assert.equal(room.phase, 'hunt');
 });

@@ -70,8 +70,10 @@ export type ClientMsg =
   | { t: 'shoot'; origin: Vec3; dir: Vec3 }
   /** Props with a rocket or grenade weapon: fire it along the camera ray. */
   | { t: 'rocket'; origin: Vec3; dir: Vec3 }
-  /** The character's right-click skill, e.g. a charge toward `yaw`. */
-  | { t: 'skill'; yaw: number }
+  /** The character's right-click skill, e.g. a leap toward `yaw`; `power` 0..1 is how long it was held. */
+  | { t: 'skill'; yaw: number; power: number }
+  /** The `decoy` disguise: leave a copy of yourself here. */
+  | { t: 'decoy' }
   | { t: 'disguise'; propId: number };
 
 export interface RocketSnap {
@@ -95,7 +97,9 @@ export type ServerMsg =
   | { t: 'shot'; from: number; origin: Vec3; end: Vec3; hit: ShotHit; target?: number }
   /** A rocket went off: `hit` lists who it pushed or hurt. */
   | { t: 'boom'; from: number; pos: Vec3; hit: number[] }
-  /** A charge skill ran into someone. */
+  /** A decoy was hit and popped. */
+  | { t: 'poof'; pos: Vec3 }
+  /** A leap skill ran into someone. */
   | { t: 'bash'; from: number; victim: number; pos: Vec3 }
   | { t: 'kill'; killer: number | null; victim: number }
   | { t: 'roundEnd'; winner: Team | null }

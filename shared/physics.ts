@@ -1,4 +1,3 @@
-import { CHARGE_SPEED } from './characters.ts';
 import {
   GRAVITY, HUNTER_SIZE, HUNTER_SPEED, JUMP_SPEED, KNOCKBACK_AIR_DRAG, KNOCKBACK_GROUND_DRAG, PROP_SPEED, SPRINT_MULT, SPRINT_SECONDS, STAMINA_REFILL_SECONDS,
   STEP_HEIGHT, WINDED_UNTIL,
@@ -19,7 +18,11 @@ export interface BodyState {
   stamina: number;
   /** Ran out of stamina and hasn't refilled to WINDED_UNTIL yet. */
   winded: boolean;
-  /** Seconds left of a charge skill, flying along (chargeX, chargeZ) instead of walking. */
+  /**
+   * Seconds left of a leap skill (a safety limit; it ends on landing or
+   * against a wall). While it lasts you fly on vx/vz/vy instead of walking.
+   * (chargeX, chargeZ) is the direction, for throwing whoever you hit.
+   */
   charge: number;
   chargeX: number;
   chargeZ: number;
@@ -106,9 +109,7 @@ export function stepBody(
   let sprinting = false;
   const charging = b.charge > 0;
   if (charging) {
-    // Flying straight ahead; no steering or jumping until it's over.
-    mx = b.chargeX * CHARGE_SPEED * dt;
-    mz = b.chargeZ * CHARGE_SPEED * dt;
+    // In the air on the leap's own speed; no steering or jumping until it's over.
     b.charge = Math.max(0, b.charge - dt);
   } else if (!frozen) {
     const fwd = (keys.f ? 1 : 0) - (keys.b ? 1 : 0);
@@ -144,9 +145,9 @@ export function stepBody(
   let blocked = false;
   if (moveHorizontal(b, size, 0, mx + b.vx * dt, solids)) [b.vx, blocked] = [0, true];
   if (moveHorizontal(b, size, 2, mz + b.vz * dt, solids)) [b.vz, blocked] = [0, true];
-  // A charge ends against a wall.
-  if (charging && blocked) b.charge = 0;
   moveVertical(b, size, b.vy * dt, solids);
+  // A leap ends against a wall or on landing.
+  if (charging && (blocked || (b.onGround && b.vy <= 0))) b.charge = 0;
 }
 
 /** Pushes a body up out of anything it overlaps, e.g. after changing size. */

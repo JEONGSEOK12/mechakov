@@ -25,18 +25,25 @@ export interface WeaponDef {
  * - `prop`: E turns you into a nearby map prop.
  * - `invisible`: stand still for `INVISIBLE_AFTER` seconds and you vanish for
  *   everyone else until you move or attack.
+ * - `decoy`: E leaves a copy of you standing where you are, which looks and
+ *   moves like a player to everyone else and pops at the first hit.
  */
-export type DisguiseKind = 'prop' | 'invisible';
+export type DisguiseKind = 'prop' | 'invisible' | 'decoy';
 
 /**
- * The right-click skill. `charge`: you fly forward like a projectile for
- * `time` seconds; the first player you hit takes `damage` and is thrown.
+ * The right-click skill. `leap`: hold to charge for up to `chargeTime`
+ * seconds, let go to throw yourself in an arc like a grenade, farther and
+ * higher the longer you held. The first player you hit before landing takes
+ * `damage` and is thrown.
  */
 export interface SkillDef {
-  kind: 'charge';
+  kind: 'leap';
   name: string;
   cooldown: number;
-  time: number;
+  chargeTime: number;
+  /** Launch speed along the ground and upward, at no charge and full charge, in m/s. */
+  speed: [number, number];
+  lift: [number, number];
   damage: number;
   knockback: number;
 }
@@ -55,8 +62,8 @@ export interface CharacterDef {
 
 /** Seconds of standing still before an `invisible` character vanishes. */
 export const INVISIBLE_AFTER = 2;
-/** How fast a `charge` skill flies, in m/s. */
-export const CHARGE_SPEED = 17;
+/** Seconds between decoys. */
+export const DECOY_COOLDOWN = 5;
 
 const weapon = (w: Partial<WeaponDef> & Pick<WeaponDef, 'kind' | 'damage' | 'cooldown'>): WeaponDef =>
   ({ knockback: 0, speed: 0, range: 0, auto: false, decoyPenalty: false, ...w });
@@ -74,12 +81,22 @@ export const CHARACTERS: Record<string, CharacterDef> = {
   },
   grenadier: {
     name: '척탄병',
-    desc: '가만히 2초 있으면 투명, 유탄 발사기, 우클릭 돌진',
+    desc: '가만히 2초 있으면 투명, 유탄 발사기, 우클릭을 눌렀다 떼면 포물선 돌진',
     hp: 1,
     speed: 1,
     disguise: 'invisible',
     weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.6, knockback: 10, speed: 17 }),
-    skill: { kind: 'charge', name: '돌진', cooldown: 6, time: 0.7, damage: 30, knockback: 16 },
+    skill: { kind: 'leap', name: '돌진', cooldown: 6, chargeTime: 1, speed: [8, 20], lift: [5, 10], damage: 30, knockback: 16 },
+  },
+  // A stand-in to try the decoy ability until it gets a character of its own.
+  decoyTest: {
+    name: '분신 (임시)',
+    desc: 'E로 내 분신을 세워 두기, 로켓',
+    hp: 1,
+    speed: 1,
+    disguise: 'decoy',
+    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 1.4, knockback: 18, speed: 20 }),
+    skill: null,
   },
 };
 

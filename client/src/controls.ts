@@ -17,7 +17,8 @@ export class Controls {
 
   onShoot: () => void = () => {};
   onCharacter: () => void = () => {};
-  onSkill: () => void = () => {};
+  /** The skill button went down (true) or up (false); right mouse or Q. */
+  onSkill: (down: boolean) => void = () => {};
   /** The fire button is down (for guns that keep firing while held). */
   firing = false;
   onDisguise: () => void = () => {};
@@ -65,7 +66,7 @@ export class Controls {
     });
     document.addEventListener('mousedown', (e) => {
       if (!this.locked) return;
-      if (e.button === 2) this.onSkill();
+      if (e.button === 2) this.onSkill(true);
       if (e.button !== 0) return;
       this.firing = true;
       this.onShoot();
@@ -75,6 +76,7 @@ export class Controls {
     });
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.firing = false;
+      if (e.button === 2) this.onSkill(false);
     });
     document.addEventListener('keydown', (e) => this.key(e, true));
     document.addEventListener('keyup', (e) => this.key(e, false));
@@ -98,7 +100,7 @@ export class Controls {
       case 'KeyF': if (down && !e.repeat) this.onPickup(); break;
       case 'KeyH': if (down && !e.repeat) this.onHideout(); break;
       case 'KeyB': if (down && !e.repeat) this.onAddBot(); break;
-      case 'KeyQ': if (down && !e.repeat) this.onSkill(); break;
+      case 'KeyQ': if (!e.repeat) this.onSkill(down); break;
       case 'KeyC': if (down && !e.repeat) this.onCharacter(); break;
       case 'KeyM': if (down && !e.repeat) this.onMap(); break;
       case 'KeyN': if (down && !e.repeat) this.onMute(); break;
