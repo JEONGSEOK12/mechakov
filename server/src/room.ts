@@ -3,7 +3,7 @@ import {
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
   GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
-import { ammoAfter, CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
+import { ammoAfter, CHARACTER_IDS, skillUses, spendSkill, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
@@ -38,7 +38,8 @@ export class Player {
   lastRocket = -Infinity;
   /** Shots left in the clip right after `lastRocket`; see `ammoAfter`. */
   ammo = 0;
-  lastSkill = -Infinity;
+  /** When every saved skill use is back; see `skillUses`. */
+  skillFullAt = -Infinity;
   /** Seconds without moving or attacking, for the `invisible` disguise. */
   stillFor = 0;
   lastDecoy = -Infinity;
@@ -285,7 +286,7 @@ export class Room {
         if (isVec3(msg.origin) && isVec3(msg.dir)) this.fireRocket(p, msg.origin, msg.dir);
         break;
       case 'skill':
-        if (isNum(msg.yaw) && isNum(msg.power)) this.useSkill(p, msg.yaw, Math.max(0, Math.min(1, msg.power)));
+        if (isNum(msg.yaw) && isNum(msg.power)) this.useSkill(p, msg.yaw, isNum(msg.pitch) ? Math.max(-1.4, Math.min(1.4, msg.pitch)) : 0, Math.max(0, Math.min(1, msg.power)));
         break;
       case 'decoy':
         this.placeDecoy(p);
@@ -805,17 +806,22 @@ export class Room {
    * The leap skill: throw yourself in an arc toward `yaw`, farther the longer
    * it was charged, and the first player you meet before landing takes the hit.
    */
-  private useSkill(p: Player, yaw: number, power: number) {
+  private useSkill(p: Player, yaw: number, pitch: number, power: number) {
     const skill = p.character.skill;
     if (!skill || !p.alive || p.role !== 'prop' || p.decoyOf || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
-    if (this.time - p.lastSkill < skill.cooldown - 0.05 || p.body.charge > 0) return;
-    p.lastSkill = this.time;
+    if (skillUses(skill, p.skillFullAt, this.time + 0.05) < 1 || p.body.charge > 0) return;
+    p.skillFullAt = spendSkill(skill, p.skillFullAt, this.time);
     p.stillFor = 0;
     const speed = skill.speed[0] + (skill.speed[1] - skill.speed[0]) * power;
     const lift = skill.lift[0] + (skill.lift[1] - skill.lift[0]) * power;
     const b = p.body;
+    // Along where you look, up and down too, like a Left 4 Dead hunter's
+    // pounce, with a little lift on top so a level leap still arcs. Off the
+    // ground you can dive; on it you can't leap into the floor.
     [b.chargeX, b.chargeZ] = [-Math.sin(yaw), -Math.cos(yaw)];
-    [b.vx, b.vz, b.vy] = [b.chargeX * speed, b.chargeZ * speed, lift];
+    const flat = Math.cos(pitch) * speed;
+    [b.vx, b.vz, b.vy] = [b.chargeX * flat, b.chargeZ * flat, Math.sin(pitch) * speed + lift];
+    if (b.onGround) b.vy = Math.max(b.vy, lift);
     b.onGround = false;
     b.charge = 3;
   }

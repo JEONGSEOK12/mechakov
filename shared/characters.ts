@@ -36,16 +36,19 @@ export type DisguiseKind = 'prop' | 'invisible' | 'decoy';
 
 /**
  * The right-click skill. `leap`: hold to charge for up to `chargeTime`
- * seconds, let go to throw yourself in an arc like a grenade, farther and
+ * seconds, let go to throw yourself where you look (up and down too) in an arc like a grenade, farther and
  * higher the longer you held. The first player you hit before landing takes
  * `damage` and is thrown.
  */
 export interface SkillDef {
   kind: 'leap';
   name: string;
+  /** Seconds for one use to come back; uses come back one after another. */
   cooldown: number;
+  /** Uses you can save up. */
+  stacks: number;
   chargeTime: number;
-  /** Launch speed along the ground and upward, at no charge and full charge, in m/s. */
+  /** Launch speed along where you look, and extra upward speed, at no charge and full charge, in m/s. */
   speed: [number, number];
   lift: [number, number];
   damage: number;
@@ -100,7 +103,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     speed: 1,
     disguise: 'invisible',
     weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.4, clip: 3, reload: 3, knockback: 18, speed: 17 }),
-    skill: { kind: 'leap', name: '돌진', cooldown: 6, chargeTime: 1, speed: [8, 20], lift: [5, 10], damage: 30, knockback: 16 },
+    skill: { kind: 'leap', name: '돌진', cooldown: 6, stacks: 2, chargeTime: 1, speed: [8, 18], lift: [4.5, 6], damage: 30, knockback: 16 },
   },
   // A stand-in to try the decoy ability until it gets a character of its own.
   decoyTest: {
@@ -113,6 +116,25 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     skill: null,
   },
 };
+
+/**
+ * Skill uses are tracked by `fullAt`, the time the last spent use comes back:
+ * every use pushes it one cooldown later, so spent uses refill one at a time.
+ */
+export function skillUses(skill: SkillDef, fullAt: number, now: number): number {
+  return skill.stacks - Math.ceil(Math.max(0, fullAt - now) / skill.cooldown - 1e-6);
+}
+
+/** `fullAt` after spending a use now. */
+export function spendSkill(skill: SkillDef, fullAt: number, now: number): number {
+  return Math.max(fullAt, now) + skill.cooldown;
+}
+
+/** Seconds until the next use comes back (0 when all are ready). */
+export function nextSkillIn(skill: SkillDef, fullAt: number, now: number): number {
+  const wait = fullAt - now;
+  return wait <= 0 ? 0 : wait - (Math.ceil(wait / skill.cooldown - 1e-6) - 1) * skill.cooldown;
+}
 
 export const CHARACTER_IDS = Object.keys(CHARACTERS);
 export const DEFAULT_CHARACTER = 'rocketeer';

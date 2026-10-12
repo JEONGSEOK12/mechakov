@@ -73,7 +73,7 @@ export type ClientMsg =
   /** Props with a rocket or grenade weapon: fire it along the camera ray. */
   | { t: 'rocket'; origin: Vec3; dir: Vec3 }
   /** The character's right-click skill, e.g. a leap toward `yaw`; `power` 0..1 is how long it was held. */
-  | { t: 'skill'; yaw: number; power: number }
+  | { t: 'skill'; yaw: number; pitch?: number; power: number }
   /** The `decoy` disguise: leave a copy of yourself here. */
   | { t: 'decoy' }
   /** Solo, between raids: go to the practice range (true) or back to the hideout. */

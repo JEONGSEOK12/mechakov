@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ammoAfter, CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, type WeaponDef } from '../../shared/characters.ts';
+import { ammoAfter, CHARACTER_IDS, CHARACTERS, characterOf, DECOY_COOLDOWN, nextSkillIn, skillUses, spendSkill, type WeaponDef } from '../../shared/characters.ts';
 import { DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, PICKUP_RANGE, ROCKET_DELAY, TICK_DT } from '../../shared/constants.ts';
 import { lookDir } from '../../shared/geometry.ts';
 import { generateMap, STATION_RANGE, THEME_NAMES, zoneAt, type GameMap, type Station } from '../../shared/map.ts';
@@ -114,7 +114,8 @@ export class Game {
   private lastRocket = -Infinity;
   /** Shots left in the clip right after `lastRocket`; see `ammoAfter`. */
   private ammo = 0;
-  private lastSkill = -Infinity;
+  /** When every saved skill use is back; see `skillUses`. */
+  private skillFullAt = -Infinity;
   /** Damage numbers floating up from where your hits landed. */
   private floats: { el: HTMLElement; pos: THREE.Vector3; born: number }[] = [];
   /** When the skill button went down, while it's held and charging. */
@@ -527,14 +528,14 @@ export class Game {
     }
     const now = performance.now();
     if (down) {
-      if (now - this.lastSkill >= skill.cooldown * 1000) this.skillHeldSince = now;
+      if (skillUses(skill, this.skillFullAt, now / 1000) >= 1) this.skillHeldSince = now;
       return;
     }
     if (this.skillHeldSince === null) return;
     const power = this.skillPower(skill.chargeTime);
     this.skillHeldSince = null;
-    this.lastSkill = now;
-    this.net.send({ t: 'skill', yaw: this.controls.yaw, power });
+    this.skillFullAt = spendSkill(skill, this.skillFullAt, now / 1000);
+    this.net.send({ t: 'skill', yaw: this.controls.yaw, pitch: this.controls.pitch, power });
     sfx.charge();
     this.shake(0.12 + 0.15 * power, 250);
   }
@@ -800,9 +801,12 @@ export class Game {
         hints.push(`E: 분신 세우기${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
       }
       if (char.skill) {
-        const left = char.skill.cooldown - (performance.now() - this.lastSkill) / 1000;
+        const now = performance.now() / 1000;
+        const uses = skillUses(char.skill, this.skillFullAt, now);
+        const next = nextSkillIn(char.skill, this.skillFullAt, now);
+        const pips = '●'.repeat(uses) + '○'.repeat(char.skill.stacks - uses);
         if (this.skillHeldSince !== null) hints.push(`${char.skill.name} 충전 ${Math.round(this.skillPower(char.skill.chargeTime) * 100)}%`);
-        else hints.push(`우클릭 누르고 떼기: ${char.skill.name}${left > 0 ? ` (${Math.ceil(left)}초)` : ''}`);
+        else hints.push(`우클릭 누르고 떼기: ${char.skill.name} ${pips}${next > 0 ? ` (${Math.ceil(next)}초)` : ''}`);
       }
     }
     if (this.disguiseTarget !== null) hints.push(`E: ${PROPS[this.map.props[this.disguiseTarget].type].name}(으)로 변신`);
