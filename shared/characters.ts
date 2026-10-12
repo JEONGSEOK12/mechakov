@@ -8,6 +8,10 @@ export interface WeaponDef {
   damage: number;
   /** Seconds between shots. */
   cooldown: number;
+  /** Projectiles: shots before reloading (0 for no limit). */
+  clip: number;
+  /** Seconds after the last shot until the whole clip is full again. */
+  reload: number;
   /** Projectiles: push at the blast centre, in m/s. */
   knockback: number;
   /** Projectiles: launch speed, in m/s. */
@@ -66,7 +70,17 @@ export const INVISIBLE_AFTER = 2;
 export const DECOY_COOLDOWN = 5;
 
 const weapon = (w: Partial<WeaponDef> & Pick<WeaponDef, 'kind' | 'damage' | 'cooldown'>): WeaponDef =>
-  ({ knockback: 0, speed: 0, range: 0, auto: false, decoyPenalty: false, ...w });
+  ({ knockback: 0, speed: 0, range: 0, auto: false, decoyPenalty: false, clip: 0, reload: 0, ...w });
+
+/**
+ * Shots left in the clip, given what was left after the last shot: it fills
+ * back up all at once `reload` seconds after that shot, so an empty clip
+ * means a long wait and a half-empty one tops up if you hold fire as long.
+ */
+export function ammoAfter(weapon: WeaponDef, left: number, lastShot: number, now: number): number {
+  if (!weapon.clip) return Infinity;
+  return now - lastShot >= weapon.reload ? weapon.clip : left;
+}
 
 /** Everyone plays a prop; the character decides how you hide, move and fight. */
 export const CHARACTERS: Record<string, CharacterDef> = {
@@ -76,7 +90,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'prop',
-    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 1.4, knockback: 18, speed: 20 }),
+    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 20 }),
     skill: null,
   },
   grenadier: {
@@ -85,7 +99,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'invisible',
-    weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.6, knockback: 10, speed: 17 }),
+    weapon: weapon({ kind: 'grenade', damage: 22, cooldown: 0.4, clip: 3, reload: 3, knockback: 10, speed: 17 }),
     skill: { kind: 'leap', name: '돌진', cooldown: 6, chargeTime: 1, speed: [8, 20], lift: [5, 10], damage: 30, knockback: 16 },
   },
   // A stand-in to try the decoy ability until it gets a character of its own.
@@ -95,7 +109,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     hp: 1,
     speed: 1,
     disguise: 'decoy',
-    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 1.4, knockback: 18, speed: 20 }),
+    weapon: weapon({ kind: 'rocket', damage: 18, cooldown: 0.8, clip: 3, reload: 3, knockback: 18, speed: 20 }),
     skill: null,
   },
 };

@@ -473,3 +473,28 @@ test('solo: the practice range has dummies that take hits and stand back up', ()
   assert.equal(room.map.theme, 'hideout');
   assert.ok(![...room.players.values()].some((p) => p.dummy), 'dummies are gone');
 });
+
+test('rockets come three to a clip, and the clip refills a while after the last shot', () => {
+  const room = new Room('solo-clip', 7, timings, undefined, 'hideout');
+  room.autoStart = false;
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  room.handle(me, { t: 'practice', on: true });
+  room.tick();
+  room.stop();
+  const fired: number[] = [];
+  const fire = () => {
+    const before = me.lastRocket;
+    room.handle(me, { t: 'rocket', origin: [me.body.pos[0], 1.6, me.body.pos[2]], dir: [0, 1, 0] });
+    if (me.lastRocket !== before) fired.push(room.time);
+  };
+  // Hold fire for 2.5 s: three shots, then nothing while it reloads.
+  for (let i = 0; i < 2.5 / TICK_DT; i++) {
+    fire();
+    room.tick();
+  }
+  assert.equal(fired.length, 3);
+  assert.ok(fired[1] - fired[0] < 1, 'shots come quickly');
+  for (let i = 0; i < 2 / TICK_DT; i++) room.tick();
+  fire();
+  assert.equal(fired.length, 4, 'full again after the reload');
+});
