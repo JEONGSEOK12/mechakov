@@ -1,3 +1,4 @@
+import { characterOf } from '../../shared/characters.ts';
 import { ITEMS } from '../../shared/items.ts';
 import type { Outcome, PlayerSnap, RosterEntry } from '../../shared/protocol.ts';
 import type { Phase, Team } from '../../shared/types.ts';
@@ -22,8 +23,8 @@ export class Hud {
     $('hud').classList.remove('hidden');
   }
 
-  phase(phase: Phase, timeLeft: number, mapName: string, manualStart = false) {
-    const label = phase === 'lobby' && manualStart ? '다음 레이드 준비' : PHASE_LABEL[phase];
+  phase(phase: Phase, timeLeft: number, mapName: string, manualStart = false, ffa = true) {
+    const label = phase === 'lobby' && manualStart ? '다음 레이드 준비' : ffa && (phase === 'hide' || phase === 'hunt') ? '레이드' : PHASE_LABEL[phase];
     $('phase-label').textContent = `${mapName} · ${label}`;
     $('phase-timer').textContent = phase === 'lobby' ? '' : clock(timeLeft);
   }
@@ -32,10 +33,10 @@ export class Hud {
     const role = $('role');
     if (!me) return;
     if (inHideout && phase === 'lobby') {
-      role.textContent = '은신처: 출구 문으로 나가면 레이드 시작';
+      role.textContent = `은신처 · ${characterOf(me.character).name} (C로 변경) · 출구 문으로 나가면 레이드 시작`;
       role.style.color = '#ffd27a';
     } else if (phase === 'lobby' || phase === 'countdown') {
-      role.textContent = '대기실: 변신 연습 중';
+      role.textContent = `대기실: ${characterOf(me.character).name} · ${characterOf(me.character).desc}`;
       role.style.color = '#ffd27a';
     } else if (me.extracted) {
       role.textContent = '탈출 성공: 관전 중';
@@ -47,7 +48,7 @@ export class Hud {
       role.textContent = '헌터: 숨은 프롭을 찾아 쏘세요';
       role.style.color = '#ff7a6b';
     } else {
-      role.textContent = '프롭: 사물로 변신해 숨으세요';
+      role.textContent = `${characterOf(me.character).name}: 숨고, 싸우고, 탈출하세요`;
       role.style.color = '#7ad0ff';
     }
     const fill = $('hp-fill');
@@ -56,7 +57,7 @@ export class Hud {
     fill.style.background = ratio > 0.5 ? '#4cd964' : ratio > 0.25 ? '#ffcc00' : '#ff3b30';
     const cross = $('crosshair');
     cross.classList.toggle('hidden', !me.alive);
-    cross.classList.toggle('prop', me.role === 'prop');
+    cross.classList.toggle('prop', me.role === 'prop' && characterOf(me.character).weapon.kind === 'rocket');
   }
 
   /** The named area you're standing in, e.g. 사무실 inside the warehouse. */
@@ -110,8 +111,10 @@ export class Hud {
     $('center-msg').textContent = text;
   }
 
-  roundEnd(winner: Team | null) {
-    this.center(winner === 'hunters' ? '헌터 승리!' : winner === 'props' ? '프롭 승리!' : '라운드 취소');
+  /** Teams when there were hunters; otherwise each player's own result. */
+  roundEnd(winner: Team | null, outcome: Outcome | null) {
+    if (winner) this.center(winner === 'hunters' ? '헌터 승리!' : '프롭 승리!');
+    else this.center(outcome === 'extracted' ? '레이드 종료 · 탈출 성공!' : outcome === 'died' ? '레이드 종료 · 사망' : '레이드 종료');
   }
 
   kill(text: string) {
@@ -171,7 +174,7 @@ export class Hud {
         (stashed.length ? `<div class="slots">${stashed.map(([t, n]) => item(t, n)).join('')}</div>` : '<p class="muted">아직 없어요. 아이템을 챙겨 탈출하세요.</p>')) +
       `</div><div class="inv-col players">` +
       section('헌터', players.filter((p) => p.role === 'hunter')) +
-      section('프롭', players.filter((p) => p.role === 'prop')) +
+      section(players.some((p) => p.role === 'hunter') ? '프롭' : '플레이어', players.filter((p) => p.role === 'prop')) +
       section('관전', players.filter((p) => p.role === 'spectator')) +
       `</div><div class="inv-foot">${canDrop && bag.length ? '가방 아이템을 클릭하면 바닥에 버려요 · ' : ''}Tab 닫기</div>`;
     // Only touch the DOM when something changed, so hover and clicks aren't lost every frame.

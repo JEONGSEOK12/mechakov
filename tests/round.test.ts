@@ -38,10 +38,17 @@ class Client {
   }
 }
 
+/** Turns the hunters team on in a client's room before anyone else joins. */
+async function huntersOn(c: Client, room: string) {
+  await c.waitFor((m) => m.t === 'welcome');
+  server.rooms.get(room)!.hunters = true;
+}
+
 const isPhase = (phase: string) => (m: ServerMsg): m is Extract<ServerMsg, { t: 'snap' }> => m.t === 'snap' && m.phase === phase;
 
 test('a full round: roles are assigned, the hunter shoots the prop, hunters win', async () => {
   const a = new Client('alice', 'round');
+  await huntersOn(a, 'round');
   const b = new Client('bob', 'round');
   await a.waitFor(isPhase('hide'));
   const room = server.rooms.get('round')!;
@@ -79,6 +86,7 @@ test('a full round: roles are assigned, the hunter shoots the prop, hunters win'
 
 test('shooting a decoy hurts the hunter', async () => {
   const a = new Client('carol', 'decoy');
+  await huntersOn(a, 'decoy');
   const b = new Client('dave', 'decoy');
   await a.waitFor(isPhase('hunt'));
   const room = server.rooms.get('decoy')!;

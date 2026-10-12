@@ -27,6 +27,8 @@ export interface PlayerSnap {
   /** Body facing; differs from yaw when a prop locks its rotation. */
   face: number;
   prop: string | null;
+  /** See `CHARACTERS`. */
+  character: string;
   /** Last input sequence number the server applied. */
   seq: number;
 }
@@ -55,11 +57,13 @@ export type ClientMsg =
   /** Drops the bag item at `index` on the floor. */
   | { t: 'drop'; index: number }
   | { t: 'upgrade'; id: string }
+  /** Picks a character; only between raids. */
+  | { t: 'character'; id: string }
   | { t: 'addBot' }
   | { t: 'start' }
   | { t: 'input'; seq: number; keys: InputKeys; yaw: number; pitch: number; face: number }
   | { t: 'shoot'; origin: Vec3; dir: Vec3 }
-  /** Props: fire an explosive rocket along the camera ray. */
+  /** Props with a rocket character: fire an explosive rocket along the camera ray. */
   | { t: 'rocket'; origin: Vec3; dir: Vec3 }
   | { t: 'disguise'; propId: number };
 

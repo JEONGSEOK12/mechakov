@@ -26,7 +26,7 @@
       <div id="result"></div>
       <div id="help">
         WASD 이동 · Space 점프 · Shift 달리기<br />
-        프롭: 클릭 폭발탄 · E 변신 · F 줍기 · R 방향 고정 &nbsp; 헌터: 클릭 사격<br />
+        클릭 공격 · E 변신 · F 줍기 · R 방향 고정 · C 캐릭터 변경 (레이드 전)<br />
         초록 탈출구에 5초 서 있으면 탈출 · H 은신처 · B 봇 추가 · Tab 인벤토리 · M 지도 · N 소리
       </div>
       <div id="center-msg"></div>
@@ -53,13 +53,13 @@
 
     <form id="join">
       <h1>MECHAKOV</h1>
-      <p>사물로 숨거나, 숨은 사물을 찾아내세요.</p>
+      <p>사물로 변신해 숨고, 싸우고, 챙겨서 탈출하는 개인전.</p>
       <input id="name" maxlength="16" placeholder="닉네임" autocomplete="off" />
       <div id="online-join" class="join-group">
         <input id="room" maxlength="32" placeholder="방 이름 (비우면 빠른 매칭)" autocomplete="off" />
         <button type="submit">온라인 입장</button>
       </div>
-      <button id="solo" type="button" class="secondary">혼자 하기 (프롭, 헌터 없음)</button>
+      <button id="solo" type="button" class="secondary">혼자 하기 (봇과 함께)</button>
       <div id="join-error"></div>
       <div id="online"></div>
     </form>

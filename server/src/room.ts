@@ -1,8 +1,9 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
-  MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_COOLDOWN, ROCKET_DAMAGE, ROCKET_KNOCKBACK, ROCKET_LIFETIME,
+  MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
   ROCKET_DELAY, ROCKET_RADIUS, ROCKET_SPEED, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
+import { CHARACTER_IDS, CHARACTERS, characterOf } from '../../shared/characters.ts';
 import { boxAt, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
 import { ITEMS, ITEM_TYPES } from '../../shared/items.ts';
 import { generateMap, THEMES, type GameMap } from '../../shared/map.ts';
@@ -52,6 +53,10 @@ export class Player {
     return this.profile.name;
   }
 
+  get weapon() {
+    return characterOf(this.profile.character).weapon;
+  }
+
   snap(extractTime: number): PlayerSnap {
     return {
       id: this.id,
@@ -74,6 +79,7 @@ export class Player {
       pitch: this.pitch,
       face: this.face,
       prop: this.prop,
+      character: CHARACTERS[this.profile.character ?? ''] ? this.profile.character! : CHARACTER_IDS[0],
       seq: this.seq,
     };
   }
@@ -109,6 +115,8 @@ export function cleanName(raw: unknown): string {
 interface Rocket extends RocketSnap {
   owner: number;
   born: number;
+  damage: number;
+  knockback: number;
 }
 
 function inBox(p: Vec3, b: { min: Vec3; max: Vec3 }) {
@@ -127,8 +135,11 @@ export class Room {
   private nextId = 1;
   private nextLootId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
-  /** Off for solo practice: everyone is a prop and the round is just loot and extract. */
-  hunters = true;
+  /**
+   * Off by default: the game is every player for themselves, all props, and
+   * the raid is loot, fight and extract. On brings back the hunters team.
+   */
+  hunters = false;
   /**
    * Off for solo: between raids everyone waits in the hideout map until the
    * person walks out its door, and the round ends as soon as every person's
@@ -190,7 +201,8 @@ export class Room {
     if (this.full || bots >= MAX_BOTS || (this.phase !== 'lobby' && this.phase !== 'countdown')) return null;
     const id = this.nextId++;
     // Bots know every disguise so they blend in anywhere.
-    const profile: Profile = { name: botName(bots), stash: {}, upgrades: { catalog: 2 } };
+    const character = CHARACTER_IDS[Math.floor(Math.random() * CHARACTER_IDS.length)];
+    const profile: Profile = { name: botName(bots), stash: {}, upgrades: { catalog: 2 }, character };
     const p = new Player(id, `bot-${id}`, profile, { send: () => {} });
     p.bot = new BotBrain();
     this.players.set(id, p);
@@ -232,6 +244,9 @@ export class Room {
         break;
       case 'upgrade':
         if (typeof msg.id === 'string') this.upgrade(p, msg.id);
+        break;
+      case 'character':
+        if (typeof msg.id === 'string') this.pickCharacter(p, msg.id);
         break;
       case 'addBot':
         this.addBot();
@@ -429,7 +444,9 @@ export class Room {
       this.sendBag(p);
     });
     this.spawnLoot();
-    this.setPhase('hide', this.timings.hide);
+    // Without hunters nobody needs time to hide: the whole raid is one fight.
+    if (this.hunters) this.setPhase('hide', this.timings.hide);
+    else this.setPhase('hunt', this.timings.hide + this.timings.hunt);
   }
 
   /** Decides a player's raid: banks their bag unless they died or went missing. */
@@ -458,7 +475,8 @@ export class Room {
     const propsWon = [...this.players.values()].some(
       (p) => p.inRound && p.role === 'prop' && (p.outcome === 'extracted' || p.outcome === 'survived'),
     );
-    const winner: Team = propsWon ? 'props' : 'hunters';
+    // Every player for themselves: each one's own result says how they did.
+    const winner: Team | null = !this.hunters ? null : propsWon ? 'props' : 'hunters';
     this.setPhase('end', this.timings.end);
     this.loot.clear();
     this.rockets.clear();
@@ -539,22 +557,39 @@ export class Room {
     this.sendBag(p);
   }
 
+  private pickCharacter(p: Player, id: string) {
+    if (!CHARACTERS[id] || (this.phase !== 'lobby' && this.phase !== 'countdown')) return;
+    p.profile.character = id;
+    p.hp = maxHp(p.profile);
+    this.store.save();
+    this.send(p, { t: 'profile', profile: p.profile });
+  }
+
+  /**
+   * Hunters' rifles, and the props whose character carries a gun. Props shoot
+   * whenever they may fire rockets; hunters only once the hunt is on.
+   */
   private shoot(p: Player, origin: Vec3, rawDir: Vec3) {
-    if (!p.alive || p.role !== 'hunter' || this.phase !== 'hunt') return;
-    if (this.time - p.lastShot < FIRE_COOLDOWN - 0.05) return;
+    if (!p.alive || this.phase === 'end') return;
+    const hunter = p.role === 'hunter';
+    const weapon = p.weapon;
+    if (hunter ? this.phase !== 'hunt' : p.role !== 'prop' || weapon.kind !== 'hitscan' || (this.phase === 'hide' && this.hunters)) return;
+    const cooldown = hunter ? FIRE_COOLDOWN : weapon.cooldown;
+    if (this.time - p.lastShot < cooldown - 0.05) return;
     const len = Math.hypot(...rawDir);
     if (len < 1e-6) return;
     const dir: Vec3 = [rawDir[0] / len, rawDir[1] / len, rawDir[2] / len];
-    const eye: Vec3 = [p.body.pos[0], p.body.pos[1] + HUNTER_EYE, p.body.pos[2]];
+    const size = bodySize(p.role, p.prop);
+    const eye: Vec3 = [p.body.pos[0], p.body.pos[1] + (hunter ? HUNTER_EYE : size[1] * 0.75), p.body.pos[2]];
     // The client aims from its third-person camera; accept that ray only if the
-    // camera is near the hunter, and start it level with the hunter so it can't
+    // camera is near the shooter, and start it level with them so it can't
     // hit things behind them.
-    if (Math.hypot(origin[0] - eye[0], origin[1] - eye[1], origin[2] - eye[2]) > 6) return;
+    if (Math.hypot(origin[0] - eye[0], origin[1] - eye[1], origin[2] - eye[2]) > (hunter ? 6 : 8)) return;
     p.lastShot = this.time;
     const along = Math.max(0, (eye[0] - origin[0]) * dir[0] + (eye[1] - origin[1]) * dir[1] + (eye[2] - origin[2]) * dir[2]);
     const start: Vec3 = [origin[0] + dir[0] * along, origin[1] + dir[1] * along, origin[2] + dir[2] * along];
 
-    let best = SHOT_RANGE;
+    let best = hunter ? SHOT_RANGE : weapon.range;
     let hit: ShotHit = 'none';
     let target: Player | null = null;
     for (const w of this.map.walls) {
@@ -579,8 +614,11 @@ export class Room {
     const end: Vec3 = [start[0] + dir[0] * best, start[1] + dir[1] * best, start[2] + dir[2] * best];
     this.broadcast({ t: 'shot', from: p.id, origin: eye, end, hit, target: target?.id });
 
-    if (target) this.damage(target, SHOT_DAMAGE, p);
-    else if (hit === 'decoy') this.damage(p, missPenalty(p.profile), null);
+    // Props only hurt each other once the fighting has started, like rockets.
+    const fighting = this.phase === 'hunt' || (this.phase === 'hide' && !this.hunters);
+    if (!hunter && !fighting) return;
+    if (target) this.damage(target, hunter ? SHOT_DAMAGE : weapon.damage, p);
+    else if (hit === 'decoy' && (hunter || weapon.decoyPenalty)) this.damage(p, missPenalty(p.profile), null);
   }
 
   /**
@@ -589,8 +627,8 @@ export class Room {
    * unless there are no hunters at all).
    */
   private fireRocket(p: Player, origin: Vec3, rawDir: Vec3) {
-    if (!p.alive || p.role !== 'prop' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
-    if (this.time - p.lastRocket < ROCKET_COOLDOWN - 0.05) return;
+    if (!p.alive || p.role !== 'prop' || p.weapon.kind !== 'rocket' || this.phase === 'end' || (this.phase === 'hide' && this.hunters)) return;
+    if (this.time - p.lastRocket < p.weapon.cooldown - 0.05) return;
     const len = Math.hypot(...rawDir);
     if (len < 1e-6) return;
     const dir: Vec3 = [rawDir[0] / len, rawDir[1] / len, rawDir[2] / len];
@@ -616,7 +654,8 @@ export class Room {
       const pos: Vec3 = [p.body.pos[0] + offset[0], p.body.pos[1] + size[1] / 2 + offset[1], p.body.pos[2] + offset[2]];
       const vel: Vec3 = [dir[0] * ROCKET_SPEED, dir[1] * ROCKET_SPEED, dir[2] * ROCKET_SPEED];
       const id = this.nextRocketId++;
-      this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time });
+      const { damage, knockback } = p.weapon;
+      this.rockets.set(id, { id, owner: p.id, pos, vel, born: this.time, damage, knockback });
     }
   }
 
@@ -671,14 +710,14 @@ export class Room {
       })) continue;
       d = len > 1e-3 ? [d[0] / len, d[1] / len, d[2] / len] : [0, 1, 0];
       const strength = 1 - dist / ROCKET_RADIUS;
-      const push = ROCKET_KNOCKBACK * (0.35 + 0.65 * strength);
+      const push = r.knockback * (0.35 + 0.65 * strength);
       p.body.vx += d[0] * push;
       p.body.vz += d[2] * push;
       // Always some lift, so a shot at someone's feet throws them up.
       p.body.vy = Math.max(p.body.vy, 0) + Math.max(d[1], 0.45) * push;
       p.body.onGround = false;
       hit.push(p.id);
-      if (p.id !== r.owner && fighting) this.damage(p, Math.round(ROCKET_DAMAGE * (0.3 + 0.7 * strength)), owner);
+      if (p.id !== r.owner && fighting) this.damage(p, Math.round(r.damage * (0.3 + 0.7 * strength)), owner);
     }
     this.broadcast({ t: 'boom', from: r.owner, pos: r.pos, hit });
   }
