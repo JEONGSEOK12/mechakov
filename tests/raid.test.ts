@@ -374,7 +374,7 @@ test('the grenadier leaps in an arc, farther when charged, and rams whoever it l
   const leap = (power: number) => {
     me.body = { ...me.body, pos: [0, 0, 12], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
     other.body.pos = [40, 0, 0];
-    me.lastSkill = -Infinity;
+    me.skillFullAt = -Infinity;
     room.handle(me, { t: 'skill', yaw: 0, power });
     let top = 0;
     for (let i = 0; i < 3 / TICK_DT && me.body.charge > 0; i++) {
@@ -391,7 +391,7 @@ test('the grenadier leaps in an arc, farther when charged, and rams whoever it l
 
   me.body = { ...me.body, pos: [0, 0, 6], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
   other.body.pos = [0, 0, 3];
-  me.lastSkill = -Infinity;
+  me.skillFullAt = -Infinity;
   room.handle(me, { t: 'skill', yaw: 0, power: 0 });
   for (let i = 0; i < 40 && other.hp === 100; i++) {
     idle(me, i + 1);
@@ -400,8 +400,21 @@ test('the grenadier leaps in an arc, farther when charged, and rams whoever it l
   assert.equal(other.hp, 70, 'took the hit');
   assert.ok(other.body.vz < -5, 'thrown back');
   assert.equal(me.body.charge, 0, 'the leap stops on impact');
+  // Two uses saved up, then a cooldown.
+  room.handle(me, { t: 'skill', yaw: 0, power: 0 });
+  assert.ok(me.body.charge > 0, 'a second use is saved up');
+  me.body = { ...me.body, vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
   room.handle(me, { t: 'skill', yaw: 0, power: 1 });
-  assert.equal(me.body.charge, 0, 'and has a cooldown');
+  assert.equal(me.body.charge, 0, 'then a cooldown');
+
+  // It follows where you look up and down.
+  me.skillFullAt = -Infinity;
+  me.body = { ...me.body, pos: [0, 0, 12], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
+  room.handle(me, { t: 'skill', yaw: 0, pitch: 1.2, power: 1 });
+  assert.ok(me.body.vy > 20 && Math.abs(me.body.vz) < 7, 'looking up throws you up');
+  me.body = { ...me.body, pos: [0, 0, 12], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
+  room.handle(me, { t: 'skill', yaw: 0, pitch: -1, power: 1 });
+  assert.ok(me.body.vy > 0, "looking down from the ground doesn't dive into the floor");
 });
 
 test('a decoy looks like the player to everyone else and pops at the first hit', () => {
