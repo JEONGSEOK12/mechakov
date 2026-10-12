@@ -303,6 +303,8 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   }
 
   const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, roughness: 0.9 });
+  // The office park's hedges, put up to break up open ground.
+  const hedgeMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3a, roughness: 1 });
   const innerMats = pal.inner.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.2 }));
   // Warehouse shelving and yard containers get detailed models; other walls are plain boxes.
   const thin = (w: Box) => Math.min(w.max[0] - w.min[0], w.max[2] - w.min[2]);
@@ -327,7 +329,8 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   map.walls.forEach((w, i) => {
     if (isRack(w) || isContainer(w) || isFence(w)) return;
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
-    const mat = w.max[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
+    const hedge = map.theme === 'office' && w.max[1] === 1.9;
+    const mat = hedge ? hedgeMat : w.max[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
     mesh.position.set((w.min[0] + w.max[0]) / 2, (w.min[1] + w.max[1]) / 2, (w.min[2] + w.max[2]) / 2);
     mesh.castShadow = true;

@@ -748,6 +748,29 @@ const MODELS: Record<string, Model> = {
     for (let i = 0; i < 4; i++) p.box(0.25, 0.02, 0.01, 0, h * 0.68 + i * 0.04, d / 2 + 0.02, shade(c, 0.7));
     for (const sx of [-1, 1]) p.box(0.01, h * 0.5, 0.4, (sx * w) / 2, h * 0.2, 0, shade(c, 0.9));
   },
+  van(p, [w, h, d], c) {
+    // A panel van, cab toward +z: body, windscreen, side windows on the cab, wheels.
+    const body = h - 0.35;
+    p.box(w - 0.06, body * 0.92, d - 0.9, 0, 0.35, -0.45, c);
+    p.box(w - 0.06, body * 0.62, 0.9, 0, 0.35, d / 2 - 0.45, c);
+    p.box(w - 0.1, body * 0.3, 0.7, 0, 0.35 + body * 0.62, d / 2 - 0.5, c, -0.45);
+    p.box(w - 0.2, body * 0.28, 0.02, 0, 0.35 + body * 0.62, d / 2 - 0.2, 0x2a3540, -0.45);
+    for (const sx of [-1, 1]) {
+      p.box(0.02, body * 0.25, 0.8, (sx * (w - 0.04)) / 2, 0.35 + body * 0.58, d / 2 - 1.05, 0x2a3540);
+      p.box(0.02, 0.04, d - 0.3, (sx * (w - 0.04)) / 2, 0.35 + body * 0.35, 0, shade(c, 0.75));
+      for (const z of [d / 2 - 0.8, -d / 2 + 0.8]) {
+        p.lying('x', 0.36, 0.26, (sx * (w - 0.3)) / 2, 0.36, z, BLACK, 16);
+        p.lying('x', 0.18, 0.27, (sx * (w - 0.3)) / 2, 0.36, z, STEEL, 12);
+      }
+      p.box(0.06, 0.12, 0.18, (sx * (w + 0.0)) / 2, 0.35 + body * 0.6, d / 2 - 0.95, BLACK);
+      p.box(0.3, 0.12, 0.02, (sx * (w - 0.5)) / 2, 0.55, d / 2, 0xf4f1d0);
+      p.box(0.25, 0.1, 0.02, (sx * (w - 0.5)) / 2, 0.55, -d / 2, 0xc0392b);
+    }
+    p.box(w - 0.02, 0.18, 0.08, 0, 0.3, d / 2 - 0.02, DARK_STEEL);
+    p.box(w - 0.02, 0.18, 0.08, 0, 0.3, -d / 2 + 0.02, DARK_STEEL);
+    p.box(0.6, 0.15, 0.02, 0, 0.55, d / 2, 0x3a3f44);
+    p.box(0.02, body * 0.8, 0.02, 0, 0.45, -d / 2 + 0.01, shade(c, 0.7));
+  },
   planter(p, [w, h, d], c) {
     p.box(w, h - 0.15, d, 0, 0, 0, c);
     p.box(w + 0.04, 0.05, d + 0.04, 0, h - 0.2, 0, shade(c, 1.2));

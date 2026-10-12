@@ -1,7 +1,7 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
-  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, ROCKET_DELAY, ROCKET_SIDE, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, PROJECTILE_HIT_PAD, ROCKET_DELAY, ROCKET_SIDE, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { ammoAfter, CHARACTER_IDS, skillUses, spendSkill, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
@@ -794,7 +794,10 @@ export class Room {
       }
       for (const other of this.players.values()) {
         if (other.id === r.owner || !other.alive || this.offStage(other)) continue;
-        const d = rayBox(r.pos, dir, boxAt(other.body.pos, bodySize(other.role, other.prop)));
+        const size = bodySize(other.role, other.prop);
+        // Projectiles hit a little outside the body, so near misses still count.
+        const pad = PROJECTILE_HIT_PAD;
+        const d = rayBox(r.pos, dir, boxAt([other.body.pos[0], other.body.pos[1] - pad, other.body.pos[2]], [size[0] + pad * 2, size[1] + pad * 2, size[2] + pad * 2]));
         if (d !== null && d < t) [t, wall, player] = [d, null, true];
       }
       let floor = false;

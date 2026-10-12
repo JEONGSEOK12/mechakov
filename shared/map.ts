@@ -347,7 +347,8 @@ function office(b: Builder) {
   // Car park: rows of barriers between the bays.
   L = b.at(...S);
   L.zone('주차장', -24, -24, 24, 24);
-  for (const z of [-14, 0, 14]) L.line(['barrier', 'barrier', 'cone'], -22, z, 22, z, 1.4, 0.7, 0);
+  // Rows of parked vans, with gaps to walk between.
+  for (const z of [-14, 0, 14]) L.line(['van'], -21, z, 21, z, 2.8, 0.55, L.chance(0.5) ? 0 : 2);
   L.line(['dumpster', 'trashCan', 'dumpster'], -22, 22, 0, 22, 4, 0.7, 2);
 
   // Lounge.
@@ -501,12 +502,16 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
     b.road(-half, v - r, half, v + r);
   }
   LAYOUTS[theme](b);
-  // A few cones and barriers along the road sides.
-  const roadside = theme === 'office' ? ['cone', 'barrier', 'trashCan'] : ['cone', 'barrier', 'cone', 'tire'];
+  // Vans left across the roads, alternating sides, so you can't see down a road.
   for (const v of ROADS) {
-    for (const side of [-r - 0.8, r + 0.8]) {
-      b.line(roadside, v + side, -half + 6, v + side, half - 6, 5, 0.12, 1);
-      b.line(roadside, -half + 6, v + side, half - 6, v + side, 5, 0.12, 0);
+    let side = rand() < 0.5 ? 1 : -1;
+    for (let at = -half + 10 + rand() * 4; at < half - 10; at += 9 + rand() * 4) {
+      if (ROADS.some((o) => Math.abs(at - o) < r + 5)) continue;
+      side = -side;
+      const across = v + side * (r - 2.3);
+      if (rand() < 0.15) continue;
+      b.vehicle('van', at, across, rand() < 0.5 ? 0 : 2);
+      b.vehicle('van', across, at, rand() < 0.5 ? 1 : 3);
     }
   }
   // Blind spots: tall things in an L with room to tuck in behind them.
@@ -520,6 +525,19 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   // A wandering edge instead of a square, leaving the exit corners open.
   for (const e of exits) b.keepClear(Math.max(-half, e.min[0] - 16), Math.max(-half, e.min[2] - 16), Math.min(half, e.max[0] + 16), Math.min(half, e.max[2] + 16));
   b.ragged(18, 6, wallHeight);
+  // An island in the middle of each crossroads, so you can't see along both roads from it.
+  for (const x of ROADS) for (const z of ROADS) b.walls.push({ min: [x - 1.6, 0, z - 1.6], max: [x + 1.6, theme === 'office' ? 1.9 : 2.2, z + 1.6] });
+  // No wide open ground: cover goes up wherever you could see far in several directions.
+  // Containers outdoors in the warehouse and yard; hedges in the office park.
+  b.fillOpen(
+    theme === 'office'
+      ? (alongX) => (alongX ? [0.9, 5, 1.9] : [5, 0.9, 1.9])
+      : (alongX) => {
+          const h = rand() < 0.3 ? 5.2 : 2.6;
+          return alongX ? [2.4, 6, h] : [6, 2.4, h];
+        },
+    22,
+  );
   const { walls, props, propBoxes, zones, roads, buildings } = b;
   const keepClear = exits.map((e): Box => ({ min: e.min, max: [e.max[0], 3, e.max[2]] }));
   const solids = [...walls, ...propBoxes, ...skyFence(half, wallHeight)];

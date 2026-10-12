@@ -56,6 +56,8 @@ export const ROCKET_LIFETIME = 4;
 export const ROCKET_RADIUS = 2.4;
 /** A short wind-up between clicking and the rocket leaving, in seconds. */
 export const ROCKET_DELAY = 0.15;
+/** How far outside a player's body a rocket or grenade still counts as a direct hit (m). */
+export const PROJECTILE_HIT_PAD = 0.4;
 /** Rockets leave this far to the right of the crosshair line, like a launcher on the shoulder (m). */
 export const ROCKET_SIDE = 0.35;
 /** Grenades fall at this many m/s², keep this much speed when they bounce, and go off after `GRENADE_FUSE` seconds. */
