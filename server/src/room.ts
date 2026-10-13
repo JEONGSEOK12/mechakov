@@ -1,7 +1,7 @@
 import {
   DEFAULT_PROP, DEFAULT_TIMINGS, DISGUISE_RANGE, FIRE_COOLDOWN, HUNTER_EYE, MAX_BOTS,
   MAX_PLAYERS, MIN_PLAYERS, PICKUP_RANGE, ROCKET_LIFETIME,
-  GRENADE_BOUNCE, GRENADE_FUSE, GRENADE_GRAVITY, PROJECTILE_HIT_PAD, ROCKET_DELAY, ROCKET_SIDE, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
+  GRENADE_BOUNCE, GRENADE_FUSE, LEAP_GLANCE, LEAP_HIT_PAD, GRENADE_GRAVITY, PROJECTILE_HIT_PAD, ROCKET_DELAY, ROCKET_SIDE, ROCKET_RADIUS, SHOT_DAMAGE, SHOT_RANGE, TICK_DT, type Timings,
 } from '../../shared/constants.ts';
 import { ammoAfter, CHARACTER_IDS, skillUses, spendSkill, CHARACTERS, characterOf, DECOY_COOLDOWN, INVISIBLE_AFTER } from '../../shared/characters.ts';
 import { boxAt, overlaps, pointBoxDistance, rayBox } from '../../shared/geometry.ts';
@@ -933,19 +933,32 @@ export class Room {
     const skill = p.character.skill;
     if (!skill) return;
     const size = bodySize(p.role, p.prop);
-    // A little ahead of and below the body, so you hit people you fly into or come down on.
-    const reach = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1] - 0.6, p.body.pos[2] + p.body.chargeZ * 0.3], [size[0], size[1] + 0.6, size[2]]);
+    const pad = LEAP_HIT_PAD;
+    // A little ahead of and below the body, so you hit people you fly into or
+    // come down on, plus a margin so near misses still catch them.
+    const core = boxAt([p.body.pos[0] + p.body.chargeX * 0.3, p.body.pos[1] - 0.6, p.body.pos[2] + p.body.chargeZ * 0.3], [size[0], size[1] + 0.6, size[2]]);
+    const reach = boxAt([core.min[0] + size[0] / 2, core.min[1] - pad, core.min[2] + size[2] / 2], [size[0] + pad * 2, size[1] + 0.6 + pad * 2, size[2] + pad * 2]);
     for (const other of this.players.values()) {
       if (other === p || !other.alive || this.offStage(other)) continue;
-      if (!overlaps(reach, boxAt(other.body.pos, bodySize(other.role, other.prop)))) continue;
+      const otherSize = bodySize(other.role, other.prop);
+      const body = boxAt(other.body.pos, otherSize);
+      if (!overlaps(reach, body)) continue;
+      // How far off the hit is: sideways from the line you're flying along
+      // past touching, and how far you pass over or under them.
+      const dx = other.body.pos[0] - p.body.pos[0];
+      const dz = other.body.pos[2] - p.body.pos[2];
+      const side = Math.abs(dx * p.body.chargeZ - dz * p.body.chargeX) - (Math.max(size[0], size[2]) + Math.max(otherSize[0], otherSize[2])) / 2;
+      const high = Math.max(core.min[1] - body.max[1], body.min[1] - core.max[1]);
+      const off = Math.min(1, Math.hypot(Math.max(0, side), Math.max(0, high)) / pad);
+      const share = 1 - (1 - LEAP_GLANCE) * off;
       p.body.charge = 0;
-      other.body.vx += p.body.chargeX * skill.knockback;
-      other.body.vz += p.body.chargeZ * skill.knockback;
-      other.body.vy = Math.max(other.body.vy, 0) + skill.knockback * 0.4;
+      other.body.vx += p.body.chargeX * skill.knockback * share;
+      other.body.vz += p.body.chargeZ * skill.knockback * share;
+      other.body.vy = Math.max(other.body.vy, 0) + skill.knockback * 0.4 * share;
       other.body.onGround = false;
       other.stillFor = 0;
       this.broadcast({ t: 'bash', from: p.id, victim: other.id, pos: [...other.body.pos] });
-      if (this.fighting) this.damage(other, skill.damage, p);
+      if (this.fighting) this.damage(other, Math.round(skill.damage * share), p);
       return;
     }
   }

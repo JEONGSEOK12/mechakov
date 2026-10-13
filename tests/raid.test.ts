@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { TICK_DT } from '../shared/constants.ts';
+import { bodySize } from '../shared/physics.ts';
 import { PROPS } from '../shared/props.ts';
 import type { ServerMsg } from '../shared/protocol.ts';
 import type { Vec3 } from '../shared/types.ts';
@@ -410,6 +411,29 @@ test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out
   assert.ok(g && g.kind === 'grenade' && g.bounced, 'bounced off the floor');
   for (let i = 0; i < 3 / TICK_DT && room.rockets.size; i++) room.tick();
   assert.equal(room.rockets.size, 0, 'went off');
+});
+
+test('a leap catches people a little off its line, for less damage', () => {
+  const { room, me, other } = grenadierRaid();
+  room.map.solids = [];
+  const width = (bodySize(me.role, me.prop)[0] + bodySize(other.role, other.prop)[0]) / 2;
+  const ram = (sideways: number) => {
+    other.hp = 100;
+    other.body = { ...other.body, pos: [sideways, 0, 3], vx: 0, vy: 0, vz: 0 };
+    me.body = { ...me.body, pos: [0, 0, 6], vx: 0, vy: 0, vz: 0, onGround: true, charge: 0 };
+    me.skillFullAt = -Infinity;
+    room.handle(me, { t: 'skill', yaw: 0, power: 0 });
+    for (let i = 0; i < 40 && me.body.charge > 0; i++) {
+      idle(me, i + 1);
+      other.body.pos = [sideways, 0, 3];
+      room.tick();
+    }
+    return 100 - other.hp;
+  };
+  assert.equal(ram(0), 30, 'full damage head on');
+  const glance = ram(width + 0.4);
+  assert.ok(glance > 0 && glance < 30, `a glancing hit does less (${glance})`);
+  assert.equal(ram(width + 1), 0, 'a clear miss');
 });
 
 test('the grenadier leaps in an arc, farther when charged, and rams whoever it lands on', () => {

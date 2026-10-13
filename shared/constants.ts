@@ -58,6 +58,10 @@ export const ROCKET_RADIUS = 2.4;
 export const ROCKET_DELAY = 0.15;
 /** How far outside a player's body a rocket or grenade still counts as a direct hit (m). */
 export const PROJECTILE_HIT_PAD = 0.4;
+/** How far past someone's body a leap still catches them; the hit is weaker the farther off. */
+export const LEAP_HIT_PAD = 0.6;
+/** The share of a leap's damage and push left for a hit at the very edge of its reach. */
+export const LEAP_GLANCE = 0.6;
 /** Rockets leave this far to the right of the crosshair line, like a launcher on the shoulder (m). */
 export const ROCKET_SIDE = 0.35;
 /** Grenades fall at this many m/s², keep this much speed when they bounce, and go off after `GRENADE_FUSE` seconds. */
