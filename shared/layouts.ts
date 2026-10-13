@@ -36,7 +36,7 @@ export interface Building extends Area {
   height: number;
 }
 
-type Side = 'n' | 's' | 'w' | 'e';
+export type Side = 'n' | 's' | 'w' | 'e';
 
 /** Chance and choices for what goes on top of a prop placed in a line. */
 const TOPS: Record<string, [number, string[]]> = {
@@ -155,6 +155,98 @@ export class Builder {
     }
     if (at < to) out.push([at, to]);
     return out;
+  }
+
+  /**
+   * A hedge maze of `cols` x `rows` cells, `cell` metres square, with its
+   * north-west corner at (x0, z0). Every cell can be reached; `loops` knocks
+   * out a share of the inner hedges so there's more than one way round.
+   * `doors` are gaps in the outside hedge, by side and cell index. Returns
+   * the middle of each dead end, for something to find there.
+   */
+  maze(x0: number, z0: number, cols: number, rows: number, cell: number, height: number, doors: [Side, number][], loops = 0.1): [number, number][] {
+    // east[i][j]: hedge between cell (i, j) and (i + 1, j); south[i][j]: between (i, j) and (i, j + 1).
+    const east = Array.from({ length: cols }, () => Array<boolean>(rows).fill(true));
+    const south = Array.from({ length: cols }, () => Array<boolean>(rows).fill(true));
+    const seen = Array.from({ length: cols }, () => Array<boolean>(rows).fill(false));
+    const stack: [number, number][] = [[Math.floor(this.rand() * cols), Math.floor(this.rand() * rows)]];
+    seen[stack[0][0]][stack[0][1]] = true;
+    while (stack.length) {
+      const [i, j] = stack[stack.length - 1];
+      const next = ([[1, 0], [-1, 0], [0, 1], [0, -1]] as const).map(([di, dj]) => [i + di, j + dj] as const).filter(([a, b]) => a >= 0 && b >= 0 && a < cols && b < rows && !seen[a][b]);
+      if (!next.length) {
+        stack.pop();
+        continue;
+      }
+      const [a, b] = next[Math.floor(this.rand() * next.length)];
+      if (a !== i) east[Math.min(a, i)][j] = false;
+      else south[i][Math.min(b, j)] = false;
+      seen[a][b] = true;
+      stack.push([a, b]);
+    }
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        if (i < cols - 1 && east[i][j] && this.chance(loops)) east[i][j] = false;
+        if (j < rows - 1 && south[i][j] && this.chance(loops)) south[i][j] = false;
+      }
+    }
+    const door = (side: Side, k: number) => doors.some(([s, at]) => s === side && at === k);
+    const t = 0.8;
+    // Hedges along x, one line per row edge, joined into long runs.
+    for (let j = 0; j <= rows; j++) {
+      const z = z0 + j * cell;
+      let run = -1;
+      for (let i = 0; i <= cols; i++) {
+        const closed = i < cols && (j === 0 ? !door('n', i) : j === rows ? !door('s', i) : south[i][j - 1]);
+        if (closed && run < 0) run = i;
+        if (!closed && run >= 0) {
+          this.wall(x0 + run * cell - t / 2, z - t / 2, x0 + i * cell + t / 2, z + t / 2, height);
+          run = -1;
+        }
+      }
+    }
+    for (let i = 0; i <= cols; i++) {
+      const x = x0 + i * cell;
+      let run = -1;
+      for (let j = 0; j <= rows; j++) {
+        const closed = j < rows && (i === 0 ? !door('w', j) : i === cols ? !door('e', j) : east[i - 1][j]);
+        if (closed && run < 0) run = j;
+        if (!closed && run >= 0) {
+          this.wall(x - t / 2, z0 + run * cell - t / 2, x + t / 2, z0 + j * cell + t / 2, height);
+          run = -1;
+        }
+      }
+    }
+    // Keep the way in clear outside each gap.
+    for (const [side, k] of doors) {
+      const c = side === 'n' || side === 's' ? x0 + (k + 0.5) * cell : z0 + (k + 0.5) * cell;
+      const h = cell / 2;
+      if (side === 'n') this.keepClear(c - h, z0 - 3, c + h, z0);
+      if (side === 's') this.keepClear(c - h, z0 + rows * cell, c + h, z0 + rows * cell + 3);
+      if (side === 'w') this.keepClear(x0 - 3, c - h, x0, c + h);
+      if (side === 'e') this.keepClear(x0 + cols * cell, c - h, x0 + cols * cell + 3, c + h);
+    }
+    const ends: [number, number][] = [];
+    for (let i = 0; i < cols; i++) {
+      for (let j = 0; j < rows; j++) {
+        const closed = [
+          j === 0 ? !door('n', i) : south[i][j - 1],
+          j === rows - 1 ? !door('s', i) : south[i][j],
+          i === 0 ? !door('w', j) : east[i - 1][j],
+          i === cols - 1 ? !door('e', j) : east[i][j],
+        ].filter(Boolean).length;
+        if (closed === 3) ends.push([x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell]);
+      }
+    }
+    return ends;
+  }
+
+  /** A hedge (or any wall) standing on a road: roads are otherwise kept clear. */
+  roadBlock(x: number, z: number, w: number, d: number, height: number) {
+    const box: Box = { min: [x - w / 2, 0, z - d / 2], max: [x + w / 2, height, z + d / 2] };
+    if (this.blocked(box, 0.15, true)) return null;
+    this.walls.push(box);
+    return box;
   }
 
   private blocked(b: Box, pad = 0.15, roads = false) {
@@ -470,5 +562,9 @@ export class Local {
 
   meetingTable(cx: number, cz: number, length: number) {
     this.b.meetingTable(cx + this.ox, cz + this.oz, length);
+  }
+
+  maze(x0: number, z0: number, cols: number, rows: number, cell: number, height: number, doors: [Side, number][], loops = 0.1): [number, number][] {
+    return this.b.maze(x0 + this.ox, z0 + this.oz, cols, rows, cell, height, doors, loops).map(([x, z]) => [x - this.ox, z - this.oz]);
   }
 }

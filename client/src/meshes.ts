@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { HUNTER_SIZE } from '../../shared/constants.ts';
-import type { GameMap, Station } from '../../shared/map.ts';
+import { GLASS_HEIGHT, type GameMap, type Station } from '../../shared/map.ts';
 import type { Box, Vec3 } from '../../shared/types.ts';
 import { ITEMS } from '../../shared/items.ts';
 import type { Theme } from '../../shared/props.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { containerModel, fenceModel, floorStripes, itemModel, propModel, rackModel } from './models.ts';
+import { containerModel, fenceModel, floorStripes, greenhouseFrames, hedgeModel, itemModel, propModel, rackModel } from './models.ts';
 
 /** One tile per 2 m of floor, over `w` by `d` metres. */
-function floorTexture(base: string, w: number, d = w): THREE.Texture {
+function floorTexture(base: string, w: number, d = w, grass = false): THREE.Texture {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
   const g = c.getContext('2d')!;
@@ -18,9 +18,17 @@ function floorTexture(base: string, w: number, d = w): THREE.Texture {
     g.fillStyle = `rgba(0,0,0,${Math.random() * 0.08})`;
     g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
   }
-  g.strokeStyle = 'rgba(0,0,0,0.18)';
-  g.lineWidth = 2;
-  g.strokeRect(0, 0, 128, 128);
+  if (grass) {
+    // Lawn: blades of lighter and darker green instead of tile seams.
+    for (let i = 0; i < 900; i++) {
+      g.fillStyle = Math.random() < 0.5 ? 'rgba(150,200,90,0.18)' : 'rgba(20,50,10,0.16)';
+      g.fillRect(Math.random() * 128, Math.random() * 128, 1, 3);
+    }
+  } else {
+    g.strokeStyle = 'rgba(0,0,0,0.18)';
+    g.lineWidth = 2;
+    g.strokeRect(0, 0, 128, 128);
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(w / 2, d / 2);
@@ -121,6 +129,7 @@ const PALETTES: Record<Theme, Palette> = {
   warehouse: { sky: 0xa9b8c6, floor: '#5a5d61', ground: '#77746d', wall: 0x8a8f94, inner: [0x6a8aa0], lamps: true, ambient: 1.6 },
   office: { sky: 0xa8c6e2, floor: '#4d5868', ground: '#8a847a', wall: 0xd9cfbf, inner: [0x9aa8b5], lamps: true, ambient: 1.8 },
   yard: { sky: 0x9cc4e4, floor: '#3d3f42', ground: '#56534d', wall: 0x5d6b4e, inner: [0xb5462f, 0x2f6db5, 0x3a8f4e, 0xc99a2e], lamps: false, ambient: 2.2 },
+  garden: { sky: 0xa6cfe6, floor: '#6e6a60', ground: '#55703f', wall: 0x8f8574, inner: [0x3f7a3a], lamps: false, ambient: 2.2 },
   range: { sky: 0xa9c4dc, floor: '#5b6470', ground: '#5b6470', wall: 0x7d8792, inner: [0x9a8f7a], lamps: false, ambient: 2 },
   hideout: { sky: 0x17140f, floor: '#4a4036', ground: '#4a4036', wall: 0x6e6253, inner: [0x8a7a62], lamps: true, ambient: 1.6 },
 };
@@ -144,8 +153,14 @@ function roadMesh(map: GameMap): THREE.Object3D {
     }
   }
   if (!asphalt.length) return g;
-  const road = new THREE.Mesh(mergeGeometries(asphalt)!, new THREE.MeshStandardMaterial({ color: 0x2f3134, roughness: 0.95 }));
+  // Garden paths are gravel, with no lines.
+  const gravel = map.theme === 'garden';
+  const road = new THREE.Mesh(mergeGeometries(asphalt)!, new THREE.MeshStandardMaterial({ color: gravel ? 0xb3a284 : 0x2f3134, roughness: 0.95 }));
   road.receiveShadow = true;
+  if (gravel) {
+    g.add(road);
+    return g;
+  }
   const lines = new THREE.Mesh(mergeGeometries(paint)!, new THREE.MeshStandardMaterial({ color: 0xe8d36a, roughness: 0.8 }));
   lines.receiveShadow = true;
   g.add(road, lines);
@@ -230,7 +245,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   scene.fog = map.half > 20 ? new THREE.Fog(pal.sky, 45, 160) : new THREE.Fog(pal.sky, 25, 60);
 
   root.add(new THREE.HemisphereLight(0xbcd3ff, 0x5a5040, pal.ambient));
-  const sun = new THREE.DirectionalLight(0xfff1dc, map.theme === 'yard' ? 2.4 : 1.6);
+  const sun = new THREE.DirectionalLight(0xfff1dc, map.theme === 'yard' || map.theme === 'garden' ? 2.4 : 1.6);
   sun.position.set(12, 30, 8);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -271,7 +286,7 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const outside = map.buildings.length > 0 || map.roads.length > 0;
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(map.half * 2, map.half * 2),
-    new THREE.MeshStandardMaterial({ map: floorTexture(outside ? pal.ground : pal.floor, map.half * 2), roughness: 0.95 }),
+    new THREE.MeshStandardMaterial({ map: floorTexture(outside ? pal.ground : pal.floor, map.half * 2, map.half * 2, map.theme === 'garden'), roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
@@ -282,11 +297,24 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const roofMat = new THREE.MeshStandardMaterial({ color: 0x5b5f63, roughness: 0.9 });
   // The underside, lit a little on its own so ceilings aren't black.
   const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xc9c6bf, emissive: 0x3a3936, roughness: 0.95 });
+  // Greenhouses get a glass roof instead, with the sky showing through.
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0xd4ece4, roughness: 0.1, metalness: 0.1, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
+  const isGreenhouse = (height: number) => map.theme === 'garden' && height === GLASS_HEIGHT;
   for (const bld of map.buildings) {
     const w = bld.max[0] - bld.min[0];
     const d = bld.max[1] - bld.min[1];
     const cx = (bld.min[0] + bld.max[0]) / 2;
     const cz = (bld.min[1] + bld.max[1]) / 2;
+    if (isGreenhouse(bld.height)) {
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor, w, d), roughness: 0.9 }));
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.set(cx, 0.015, cz);
+      floor.receiveShadow = true;
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.05, d + 0.2), glassMat);
+      roof.position.set(cx, bld.height + 0.03, cz);
+      root.add(floor, roof);
+      continue;
+    }
     const inside = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: floorTexture(pal.floor, w, d), roughness: 0.9 }));
     inside.rotation.x = -Math.PI / 2;
     inside.position.set(cx, 0.015, cz);
@@ -311,13 +339,21 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
   const isRack = (w: Box) => map.theme === 'warehouse' && [2.4, 3.2, 4.2].includes(w.max[1]) && thin(w) <= 1.3 && thin(w) > 0.5;
   const isFence = (w: Box) => map.theme === 'warehouse' && w.max[1] === 2.5 && thin(w) <= 0.31;
   const isContainer = (w: Box) => w.max[1] > 2 && w.max[1] < map.wallHeight + 2 && Math.abs(thin(w) - 2.4) < 0.01;
+  // In the garden everything but the outer wall and the greenhouse glass is hedge.
+  const outerWall = (w: Box) => w.min[0] < -map.half - 0.01 || w.max[0] > map.half + 0.01 || w.min[2] < -map.half - 0.01 || w.max[2] > map.half + 0.01;
+  const isGlass = (w: Box) => isGreenhouse(w.max[1]);
+  const isHedge = (w: Box) => map.theme === 'garden' && !outerWall(w) && !isGlass(w);
   const racks = map.walls.filter(isRack);
-  const containers = map.walls.filter(isContainer);
+  const containers = map.theme === 'garden' ? [] : map.walls.filter(isContainer);
   const fences = map.walls.filter(isFence);
+  const hedges = map.walls.filter(isHedge);
+  const glass = map.walls.filter(isGlass);
   for (const [geo, mat] of [
     [racks.length ? rackModel(racks, map.seed) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.2 })],
     [containers.length ? containerModel(containers, PALETTES.yard.inner) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.3 })],
     [fences.length ? fenceModel(fences) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.5 })],
+    [hedges.length ? hedgeModel(hedges, map.seed) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })],
+    [glass.length ? greenhouseFrames(glass) : null, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })],
   ] as const) {
     if (!geo) continue;
     const mesh = new THREE.Mesh(geo, mat);
@@ -327,8 +363,17 @@ export function buildWorld(scene: THREE.Scene, root: THREE.Group, map: GameMap):
     colliders.push(mesh);
   }
   map.walls.forEach((w, i) => {
-    if (isRack(w) || isContainer(w) || isFence(w)) return;
+    if (isRack(w) || (map.theme !== 'garden' && isContainer(w)) || isFence(w) || isHedge(w)) return;
     const size = [w.max[0] - w.min[0], w.max[1] - w.min[1], w.max[2] - w.min[2]];
+    if (isGlass(w)) {
+      // Panes above the brick base (the frames are drawn with the hedges' batch above).
+      const y0 = w.min[1] < 0.01 ? 0.8 : w.min[1];
+      const pane = new THREE.Mesh(new THREE.BoxGeometry(size[0] - 0.02, w.max[1] - y0, size[2] - 0.02), glassMat);
+      pane.position.set((w.min[0] + w.max[0]) / 2, (y0 + w.max[1]) / 2, (w.min[2] + w.max[2]) / 2);
+      root.add(pane);
+      colliders.push(pane);
+      return;
+    }
     const hedge = map.theme === 'office' && w.max[1] === 1.9;
     const mat = hedge ? hedgeMat : w.max[1] < map.wallHeight ? innerMats[i % innerMats.length] : wallMat;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), mat);
