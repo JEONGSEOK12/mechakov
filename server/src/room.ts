@@ -978,8 +978,10 @@ export class Room {
       const push = r.knockback * (0.35 + 0.65 * strength);
       p.body.vx += d[0] * push;
       p.body.vz += d[2] * push;
-      // Always some lift, so a shot at someone's feet throws them up.
-      p.body.vy = Math.max(p.body.vy, 0) + Math.max(d[1], 0.45) * push;
+      // Lift fades less with distance than the push and always points mostly
+      // up, so a shot that lands a little off still throws people into the air.
+      const lift = r.knockback * (0.5 + 0.5 * strength) * Math.max(d[1], 0.8);
+      p.body.vy = Math.max(p.body.vy, 0) + lift;
       p.body.onGround = false;
       p.stillFor = 0;
       hit.push(p.id);

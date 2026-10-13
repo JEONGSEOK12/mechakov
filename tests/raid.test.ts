@@ -372,6 +372,25 @@ test('a rocket at someone\'s feet goes off on the floor under them and throws th
   assert.ok(other.body.vy > Math.abs(other.body.vz) * 1.5, `thrown up more than back (${other.body.vy}, ${other.body.vz})`);
 });
 
+test('a rocket that lands a step away still throws people up', () => {
+  const room = new Room('step', 7, { ...timings, hunt: 60 });
+  room.map.solids = [];
+  room.map.walls = [];
+  const me = room.addPlayer({ send: () => {} }, 'me', 'token-me-0123456789ab', { name: 'me', stash: {}, upgrades: {} });
+  const other = room.addPlayer({ send: () => {} }, 'other', 'token-other-0123456789', { name: 'other', stash: {}, upgrades: {} });
+  for (let i = 0; i < 2 / TICK_DT && room.phase !== 'hunt'; i++) room.tick();
+  other.prop = null;
+  me.body.pos = [0, 0, 8];
+  other.body.pos = [0, 0, 0];
+  // The floor about 1.5 m in front of them.
+  room.handle(me, { t: 'rocket', origin: [0, 1.6, 9.5], dir: [0, -1.6, 1.8 - 9.5] });
+  for (let i = 0; i < 40 && other.body.vy <= 0; i++) {
+    other.body.pos = [0, 0, 0];
+    room.tick();
+  }
+  assert.ok(other.body.vy > 8, `thrown well up (${other.body.vy})`);
+});
+
 test('grenades arc, bounce, and go off on a direct hit or when the fuse runs out', () => {
   const { room, me, other } = grenadierRaid();
   // A direct hit: aim level at someone close by.
