@@ -53,8 +53,8 @@ function mulberry32(seed: number) {
 /** Half-width of the open middle where hunters spawn. */
 const CLEAR_ZONE = 6;
 
-export const THEMES: Theme[] = ['warehouse', 'office', 'yard'];
-export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', hideout: '은신처', range: '연습실' };
+export const THEMES: Theme[] = ['warehouse', 'office', 'yard', 'garden'];
+export const THEME_NAMES: Record<Theme, string> = { warehouse: '창고', office: '사무실', yard: '야적장', garden: '식물원', hideout: '은신처', range: '연습실' };
 
 /** Raid maps are 180 m across: eight areas around a middle, with roads between. */
 const HALF = 90;
@@ -78,7 +78,17 @@ const NOOKS: Record<Exclude<Theme, 'hideout' | 'range'>, [string[], string[]]> =
   warehouse: [['boxStack', 'forkPallet', 'ibcTank', 'shelfUnit', 'locker'], ['smallBox', 'barrel', 'crate', 'bucket', 'sack']],
   office: [['bookshelf', 'locker', 'shelfUnit', 'whiteboard', 'boxStack'], ['archiveBox', 'trashCan', 'plant', 'chair', 'safe']],
   yard: [['portaPotty', 'ibcTank', 'boxStack', 'forkPallet', 'dumpster'], ['tire', 'barrel', 'block', 'sandbag', 'gasCan']],
+  garden: [['topiary', 'topiary', 'cactus', 'shelfUnit', 'boxStack'], ['flowerPot', 'gnome', 'bucket', 'wateringCan', 'sack']],
 };
+
+/** Botanical garden: maze hedges (the client draws walls this tall as hedges) and greenhouse glass. */
+export const HEDGE_HEIGHT = 2.6;
+export const GLASS_HEIGHT = 4.5;
+const SMALL_BITS = ['flowerPot', 'gnome', 'bucket', 'wateringCan', 'birdbath', 'flowerPot', 'plant'];
+const GARDEN_BITS = ['gnome', 'flowerPot', 'birdbath', 'bench', 'topiary', 'wateringCan', 'flowerPot', 'bucket'];
+const BEDS = ['planter', 'planter', 'flowerPot', 'plant', 'birdbath', 'flowerPot', 'gnome'];
+const GREENHOUSE = ['plant', 'flowerPot', 'topiary', 'planter', 'plant', 'cactus', 'wateringCan'];
+const POTTING = ['shelfUnit', 'wheelbarrow', 'sack', 'bucket', 'wateringCan', 'logPile', 'stepLadder', 'toolbox', 'crate', 'boxStack', 'flowerPot'];
 
 /** Where the eight areas around the middle sit: a 3x3 grid split by the roads. */
 const CELL = 62;
@@ -455,7 +465,131 @@ function yard(b: Builder) {
   L.scatter(['tire', 'cone', 'barrier', 'block', 'barrel', 'wheelbarrow'], -22, -22, 22, 22, 10);
 }
 
-const LAYOUTS: Record<Exclude<Theme, 'hideout' | 'range'>, (b: Builder) => void> = { warehouse, office, yard };
+/**
+ * A hedge 0.8 m thick from (x0, z0) to (x1, z1), straight along x or z, with
+ * 3 m gaps centred at `gaps` (measured along it from its start).
+ */
+function hedge(L: Local, x0: number, z0: number, x1: number, z1: number, gaps: number[] = [], height = HEDGE_HEIGHT) {
+  const alongX = Math.abs(x1 - x0) >= Math.abs(z1 - z0);
+  const len = alongX ? Math.abs(x1 - x0) : Math.abs(z1 - z0);
+  const [sx, sz] = [Math.min(x0, x1), Math.min(z0, z1)];
+  const at = (t: number): [number, number] => (alongX ? [sx + t, z0] : [x0, sz + t]);
+  let from = 0;
+  for (const g of [...gaps.sort((a, b) => a - b), len + 1.5]) {
+    const to = Math.min(len, g - 1.5);
+    if (to - from > 0.4) {
+      const [ax, az] = at(from);
+      const [bx, bz] = at(to);
+      L.wall(ax - (alongX ? 0 : 0.4), az - (alongX ? 0.4 : 0), bx + (alongX ? 0 : 0.4), bz + (alongX ? 0.4 : 0), height);
+    }
+    if (g <= len) {
+      const [cx, cz] = at(g);
+      L.keepClear(cx - 1.5, cz - 1.5, cx + 1.5, cz + 1.5);
+    }
+    from = g + 1.5;
+  }
+}
+
+/** A square hedge ring of half-size `r` around (x, z), with one gap per side at the given offsets from each side's middle. */
+function hedgeRing(L: Local, x: number, z: number, r: number, offsets: [number, number, number, number]) {
+  const [n, e, sth, w] = offsets;
+  hedge(L, x - r, z - r, x + r, z - r, [r + n]);
+  hedge(L, x - r, z + r, x + r, z + r, [r + sth]);
+  hedge(L, x - r, z - r + 0.4, x - r, z + r - 0.4, [r + w - 0.4]);
+  hedge(L, x + r, z - r + 0.4, x + r, z + r - 0.4, [r + e - 0.4]);
+}
+
+/** Something small left in a maze's dead ends, so they're worth checking (and hiding in). */
+function dressEnds(L: Local, ends: [number, number][]) {
+  for (const [x, z] of ends) {
+    if (L.chance(0.85)) L.prop(L.pick(GARDEN_BITS), x, z, Math.floor(L.chance(0.5) ? 0 : 2) as Rot);
+  }
+}
+
+/**
+ * A botanical garden built around hedge mazes: a big maze, a topiary maze and
+ * a small maze, hedge rings around the middle, two greenhouses, a rose
+ * garden of hedge rooms, a fountain garden and a potting shed, with gravel
+ * paths between.
+ */
+function garden(b: Builder) {
+  // The big maze, entered from the paths on its east and south sides.
+  let L = b.at(...NW);
+  L.zone('대미로', -24, -24, 24, 24);
+  dressEnds(L, L.maze(-23, -23, 10, 10, 4.6, HEDGE_HEIGHT, [['e', 2], ['e', 7], ['s', 3], ['s', 8]]));
+  L.prop('fountain', 0, 0);
+  L.scatter(SMALL_BITS, -22, -22, 22, 22, 24);
+
+  // Rose garden: hedge rooms in staggered rows, flower beds and benches inside.
+  L = b.at(...N);
+  L.zone('장미 정원', -24, -24, 24, 24);
+  for (const [i, z] of [-16, -4, 8, 20].entries()) hedge(L, -23, z, 23, z, i % 2 ? [6, 24, 40] : [14, 32]);
+  for (const z of [-22, -10, 2, 14]) {
+    L.line(BEDS, -20, z, 20, z, 2, 0.85, 0);
+    L.line(['flowerPot', 'planter', 'flowerPot'], -20, z + 1.6, 20, z + 1.6, 3, 0.5, 2);
+    L.line(['bench', 'flowerPot', 'bench', 'birdbath'], -18, z + 3.4, 18, z + 3.4, 4.5, 0.5, 2);
+  }
+
+  // Tropical greenhouse: rows of plants under glass.
+  L = b.at(...NE);
+  L.building('열대 온실', -18, -14, 18, 14, { w: [0], s: [-9, 9] }, GLASS_HEIGHT);
+  for (const x of [-13, -7.5, -2, 3.5, 9, 14.5]) L.line(GREENHOUSE, x, -12, x, 11, 1.3, 0.9, 1);
+  L.line(['topiary', 'flowerPot', 'topiary'], -16, 22, 16, 22, 2, 0.8, 0);
+
+  // The topiary maze: wider cells, with clipped bushes in its dead ends.
+  L = b.at(...W);
+  L.zone('토피어리 미로', -22, -24, 22, 24);
+  dressEnds(L, L.maze(-20, -22.5, 8, 9, 5, HEDGE_HEIGHT, [['e', 2], ['e', 6], ['n', 3], ['s', 4]], 0.14));
+  L.scatter(['topiary', ...SMALL_BITS], -19, -21, 19, 21, 22);
+
+  // Cactus greenhouse.
+  L = b.at(...E);
+  L.building('선인장 온실', -16, -12, 16, 12, { w: [-6, 6], n: [0] }, GLASS_HEIGHT);
+  for (const z of [-8, -3, 2, 7]) L.line(['cactus', 'cactus', 'flowerPot', 'cactus', 'planter'], -12, z, 12, z, 1.4, 0.85, 0);
+  L.line(['shelfUnit', 'flowerPot', 'shelfUnit', 'bench'], 15.4, -10, 15.4, 10, 2.2, 0.7, 3);
+  hedge(L, -18, 18, 18, 18, [10, 26]);
+
+  // Potting shed: a workroom and a store, with logs and barrows outside.
+  L = b.at(...SW);
+  L.building('관리동', -14, -11, 14, 11, { n: [-6, 6], e: [0] }, 4);
+  L.partitionX(0, -11, 11, [-5, 5]);
+  L.zone('작업실', -14, -11, 0, 11);
+  L.zone('자재 창고', 0, -11, 14, 11);
+  for (const x of [-10, -5]) L.onTop(L.prop('desk', x, 0, 1), L.pick(['flowerPot', 'wateringCan', 'toolbox']));
+  L.line(['shelfUnit', 'shelfUnit', 'cabinet', 'locker'], -13.4, -9, -13.4, 9, 1.2, 0.8, 1);
+  for (const x of [4, 8, 12]) L.line(POTTING, x, -9, x, 9, 1.4, 0.7, 1);
+  L.line(['logPile', 'wheelbarrow', 'logPile', 'sack', 'crate'], -16, 18, 16, 18, 2.4, 0.8, 0);
+
+  // Fountain garden: a fountain in the middle, hedge corners and benches round it.
+  L = b.at(...S);
+  L.zone('분수 정원', -24, -24, 24, 24);
+  L.prop('fountain', 0, 0);
+  for (const [x, z, r] of [[0, -4.5, 0], [0, 4.5, 2], [-4.5, 0, 1], [4.5, 0, 3]] as const) L.prop('bench', x, z, r);
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      hedge(L, sx * 9, sz * 9, sx * 22, sz * 9, [], HEDGE_HEIGHT);
+      hedge(L, sx * 9, sz * 9.4, sx * 9, sz * 22, [], HEDGE_HEIGHT);
+      for (const z of [12.5, 15.5, 18.5, 21]) L.line(BEDS, sx * 12, sz * z, sx * 21, sz * z, 2, 0.85, 0);
+    }
+  }
+
+  // The small maze, tight and twisty.
+  L = b.at(...SE);
+  L.zone('소미로', -22, -22, 22, 22);
+  dressEnds(L, L.maze(-20.7, -20.7, 9, 9, 4.6, HEDGE_HEIGHT, [['w', 2], ['w', 7], ['n', 1], ['n', 6]], 0.06));
+  L.scatter(SMALL_BITS, -20, -20, 20, 20, 20);
+
+  // Hedge rings around the middle, their gaps never lined up.
+  L = b.at(0, 0);
+  L.zone('중앙 정원', -23, -23, 23, 23);
+  hedgeRing(L, 0, 0, 10, [4, -4, 4, -4]);
+  hedgeRing(L, 0, 0, 16, [-9, 9, -9, 9]);
+  hedgeRing(L, 0, 0, 22, [12, -12, 12, -12]);
+  for (const r of [13, 19]) L.edges(['flowerPot', 'bench', 'gnome', 'birdbath', 'topiary', 'planter'], -r, -r, r, r, 0, 3, 0.7);
+  L.edges(['flowerPot', 'planter', 'birdbath'], -8.5, -8.5, 8.5, 8.5, 0, 3, 0.6);
+}
+
+const LAYOUTS: Record<Exclude<Theme, 'hideout' | 'range'>, (b: Builder) => void> = { warehouse, office, yard, garden };
 
 /** Invisible walls above the outer walls, so a rocket jump can't fly out of the map. */
 const skyFence = (half: number, y0: number): Box[] => {
@@ -480,7 +614,7 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   if (theme === 'range') return rangeMap(seed);
   const rand = mulberry32(seed);
   const half = HALF;
-  const wallHeight = theme === 'yard' ? 4 : 6;
+  const wallHeight = theme === 'yard' || theme === 'garden' ? 4 : 6;
   const t = 0.5;
   const exits: Box[] = [
     { min: [-half, 0, -half], max: [-half + 4, 0.2, -half + 4] },
@@ -510,13 +644,19 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
       side = -side;
       const across = v + side * (r - 2.3);
       if (rand() < 0.15) continue;
+      if (theme === 'garden') {
+        // Hedge planters across the garden paths instead of parked vans.
+        b.roadBlock(at, across, 4.6, 2, HEDGE_HEIGHT);
+        b.roadBlock(across, at, 2, 4.6, HEDGE_HEIGHT);
+        continue;
+      }
       b.vehicle('van', at, across, rand() < 0.5 ? 0 : 2);
       b.vehicle('van', across, at, rand() < 0.5 ? 1 : 3);
     }
   }
   // Blind spots: tall things in an L with room to tuck in behind them.
   const [tall, hide] = NOOKS[theme];
-  for (let placed = 0, tries = 0; placed < { warehouse: 12, office: 8, yard: 24 }[theme] && tries < 600; tries++) {
+  for (let placed = 0, tries = 0; placed < { warehouse: 12, office: 8, yard: 24, garden: 14 }[theme] && tries < 600; tries++) {
     const z = b.zones[Math.floor(rand() * b.zones.length)];
     const x = z.min[0] + 2 + rand() * (z.max[0] - z.min[0] - 4);
     const y = z.min[1] + 2 + rand() * (z.max[1] - z.min[1] - 4);
@@ -530,7 +670,9 @@ export function generateMap(seed: number, theme: Theme = 'warehouse'): GameMap {
   // No wide open ground: cover goes up wherever you could see far in several directions.
   // Containers outdoors in the warehouse and yard; hedges in the office park.
   b.fillOpen(
-    theme === 'office'
+    theme === 'garden'
+      ? (alongX) => (alongX ? [0.8, 5, HEDGE_HEIGHT] : [5, 0.8, HEDGE_HEIGHT])
+      : theme === 'office'
       ? (alongX) => (alongX ? [0.9, 5, 1.9] : [5, 0.9, 1.9])
       : (alongX) => {
           const h = rand() < 0.3 ? 5.2 : 2.6;

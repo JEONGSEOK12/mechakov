@@ -151,7 +151,7 @@ export class Game {
     this.map = generateMap(seed, theme);
     this.world = buildWorld(this.scene, this.worldRoot, this.map);
     this.mapView.setMap(this.map);
-    sfx.ambience(theme === 'yard');
+    sfx.ambience(theme === 'yard' || theme === 'garden');
     this.highlight.visible = false;
     this.scene.add(this.highlight);
 
@@ -308,7 +308,7 @@ export class Game {
         this.mapView.setMap(this.map);
         this.rocketFx.clear();
         this.faceLocked = false;
-        sfx.ambience(msg.theme === 'yard');
+        sfx.ambience(msg.theme === 'yard' || msg.theme === 'garden');
         break;
       case 'profile':
         if (upgradeCount(msg.profile) > upgradeCount(this.profile)) sfx.upgrade();

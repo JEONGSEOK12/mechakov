@@ -1,4 +1,4 @@
-import { THEME_NAMES, type GameMap, type Station, type Zone } from '../../shared/map.ts';
+import { GLASS_HEIGHT, THEME_NAMES, type GameMap, type Station, type Zone } from '../../shared/map.ts';
 
 const SIZE = 900;
 const STATION_NAMES: Record<Station, string> = { stash: '보관함', bench: '작업대', door: '레이드 출발', range: '연습실', leave: '은신처로' };
@@ -99,7 +99,7 @@ export class MapView {
         edges.push(w);
         continue;
       }
-      g.fillStyle = outer ? '#c9ced4' : w.max[1] > 1.5 ? '#9aa3ad' : '#6a737d';
+      g.fillStyle = map.theme === 'garden' && w.max[1] === GLASS_HEIGHT ? '#a8d8cc' : map.theme === 'garden' && !outer ? '#4f8a45' : outer ? '#c9ced4' : w.max[1] > 1.5 ? '#9aa3ad' : '#6a737d';
       g.fillRect(X(w.min[0]), Z(w.min[2]), Math.max(2, (w.max[0] - w.min[0]) * s), Math.max(2, (w.max[2] - w.min[2]) * s));
     }
     for (const [color, grow] of [['#c9ced4', 2], ['#101215', 0]] as const) {

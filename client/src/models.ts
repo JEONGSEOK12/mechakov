@@ -781,6 +781,89 @@ const MODELS: Record<string, Model> = {
       p.blob(0.14 + r() * 0.04, 0.1 + r() * 0.05, Math.min(0.2, d / 2 - 0.04), x, h - 0.24, 0, r() < 0.5 ? 0x3c8d40 : 0x2f7a3a);
     }
   },
+  bench(p, [w, h, d], c) {
+    // Slatted seat and back on cast iron ends.
+    for (const sx of [-1, 1]) {
+      const x = sx * (w / 2 - 0.12);
+      p.box(0.06, 0.42, d - 0.1, x, 0, 0.02, BLACK);
+      p.box(0.06, h - 0.42, 0.06, x, 0.42, -d / 2 + 0.06, BLACK);
+      p.box(0.06, 0.05, d - 0.15, x, 0.6, 0.02, BLACK);
+    }
+    for (let i = 0; i < 4; i++) p.box(w, 0.04, 0.09, 0, 0.42, -d / 2 + 0.16 + i * 0.11, i % 2 ? c : shade(c, 1.1));
+    for (let i = 0; i < 3; i++) p.box(w, 0.08, 0.035, 0, 0.55 + i * 0.1, -d / 2 + 0.05, i % 2 ? c : shade(c, 1.1));
+  },
+  topiary(p, [w, h], c) {
+    // A clipped bush in a square box: a ball on a ball, like a cake stand.
+    const box = 0x7a5534;
+    p.box(w * 0.7, 0.45, w * 0.7, 0, 0, 0, box);
+    p.box(w * 0.74, 0.05, w * 0.74, 0, 0.45, 0, shade(box, 1.2));
+    p.cyl(0.05, h * 0.4, 0, 0.45, 0, 0x5a4026, 0.05, 6);
+    p.blob(w * 0.48, h * 0.2, w * 0.48, 0, 0.45 + h * 0.25, 0, c);
+    p.blob(w * 0.36, h * 0.17, w * 0.36, 0, h * 0.72, 0, shade(c, 1.12));
+    p.blob(w * 0.2, w * 0.2, w * 0.2, 0, h - w * 0.2, 0, shade(c, 1.05));
+  },
+  flowerPot(p, [w, h], c) {
+    const r = w / 2;
+    p.cyl(r * 0.72, h * 0.62, 0, 0, 0, c, r * 0.95);
+    p.cyl(r, 0.08, 0, h * 0.62 - 0.02, 0, shade(c, 1.15), r);
+    p.cyl(r * 0.9, 0.02, 0, h * 0.66, 0, 0x4a3726, r * 0.9);
+    const rr = rng(7);
+    const flowers = [0xe0475b, 0xf2c230, 0xf4f1f0, 0xd36bd0];
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + rr();
+      const x = Math.cos(a) * r * 0.45;
+      const z = Math.sin(a) * r * 0.45;
+      p.blob(0.12, 0.1, 0.12, x, h * 0.72, z, 0x3c8d40);
+      p.sphere(0.055, x, h * 0.72 + 0.1 + rr() * 0.04, z, flowers[i % flowers.length]);
+    }
+    p.blob(0.16, 0.12, 0.16, 0, h * 0.74, 0, 0x2f7a3a);
+  },
+  birdbath(p, [w, h], c) {
+    p.cyl(w * 0.3, 0.08, 0, 0, 0, shade(c, 0.9));
+    p.cyl(0.07, h - 0.2, 0, 0.08, 0, c, 0.09, 10);
+    p.cyl(w * 0.22, 0.08, 0, h - 0.16, 0, c, w / 2);
+    p.cyl(w * 0.45, 0.02, 0, h - 0.07, 0, 0x6fa8c8, w * 0.45);
+    p.sphere(0.05, w * 0.3, h - 0.02, 0, 0x5a6b7a);
+  },
+  gnome(p, [w, h], c) {
+    const r = w / 2;
+    p.cyl(r * 0.85, 0.05, 0, 0, 0, 0x6b6b6b, r * 0.85);
+    p.cyl(r * 0.8, h * 0.4, 0, 0.05, 0, 0x2f6db5, r * 0.65);
+    p.sphere(r * 0.5, 0, h * 0.52, 0, 0xf0c8a0);
+    p.blob(r * 0.45, r * 0.5, r * 0.3, 0, h * 0.42, r * 0.35, WHITE);
+    p.cyl(r * 0.55, h * 0.4, 0, h * 0.58, 0, c, 0.01, 10);
+  },
+  wateringCan(p, [w, h, d], c) {
+    p.cyl(d / 2, h * 0.75, -w * 0.08, 0, 0, c, d / 2 * 0.9);
+    const spout = new THREE.CylinderGeometry(0.02, 0.025, w * 0.45, 8);
+    spout.rotateZ(-Math.PI / 3).translate(w * 0.2, h * 0.5, 0);
+    p.add(spout, shade(c, 0.9));
+    p.cyl(0.04, 0.03, w * 0.38, h * 0.62, 0, shade(c, 1.2), 0.035, 8);
+    p.ring(d * 0.32, 0.015, -w * 0.08, h * 0.75, 0, shade(c, 0.85), 'z', Math.PI);
+  },
+  cactus(p, [w, h], c) {
+    const pot = 0xb5643c;
+    p.cyl(w * 0.32, 0.3, 0, 0, 0, pot, w * 0.4);
+    p.cyl(w * 0.18, h - 0.4, 0, 0.3, 0, c, w * 0.16, 10);
+    p.sphere(w * 0.16, 0, h - 0.1, 0, shade(c, 1.1));
+    for (const [sx, y, len] of [[1, 0.75, 0.45], [-1, 1.0, 0.35]] as const) {
+      p.box(w * 0.32, 0.12, 0.12, sx * w * 0.18, y, 0, c);
+      p.cyl(0.07, len, sx * w * 0.36, y, 0, c, 0.06, 8);
+      p.sphere(0.065, sx * w * 0.36, y + len, 0, shade(c, 1.1));
+    }
+    p.sphere(0.05, 0, h - 0.02, 0, 0xe0475b);
+  },
+  fountain(p, [w, h], c) {
+    const r = w / 2;
+    p.cyl(r, 0.45, 0, 0, 0, c, r, 24);
+    p.cyl(r - 0.12, 0.02, 0, 0.42, 0, 0x5f9fc4, r - 0.12, 24);
+    p.ring(r - 0.06, 0.07, 0, 0.45, 0, shade(c, 1.1));
+    p.cyl(0.18, 0.6, 0, 0.45, 0, c, 0.14, 12);
+    p.cyl(r * 0.45, 0.12, 0, 0.95, 0, c, r * 0.5, 18);
+    p.cyl(r * 0.4, 0.02, 0, 1.05, 0, 0x5f9fc4, r * 0.4, 18);
+    p.cyl(0.08, h - 1.1, 0, 1.05, 0, shade(c, 0.95), 0.06, 10);
+    p.sphere(0.13, 0, h - 0.1, 0, shade(c, 1.1));
+  },
 };
 
 const geometries = new Map<string, THREE.BufferGeometry>();
@@ -1140,4 +1223,59 @@ export function itemModel(type: string, color: number): THREE.BufferGeometry {
     itemGeometries.set(type, geo);
   }
   return geo;
+}
+
+/**
+ * Garden hedges, one merged geometry for every hedge wall: each run is cut
+ * into leafy chunks a little uneven in height and shade, over a darker base.
+ */
+export function hedgeModel(walls: Box[], seed: number): THREE.BufferGeometry {
+  const p = new Parts();
+  const r = rng(seed ^ 0x5eed);
+  const greens = [0x3f7a3a, 0x3a7034, 0x46843f, 0x356a31, 0x4a8a42];
+  for (const w of walls) {
+    const alongZ = w.max[2] - w.min[2] > w.max[0] - w.min[0];
+    const len = alongZ ? w.max[2] - w.min[2] : w.max[0] - w.min[0];
+    const thick = alongZ ? w.max[0] - w.min[0] : w.max[2] - w.min[2];
+    const h = w.max[1] - w.min[1];
+    const cx = (w.min[0] + w.max[0]) / 2;
+    const cz = (w.min[2] + w.max[2]) / 2;
+    const n = Math.max(1, Math.round(len / 1.3));
+    const step = len / n;
+    p.box(alongZ ? thick - 0.04 : len - 0.04, 0.3, alongZ ? len - 0.04 : thick - 0.04, cx, w.min[1], cz, 0x36592f);
+    for (let i = 0; i < n; i++) {
+      const t = -len / 2 + step * (i + 0.5);
+      const top = h - 0.3 - r() * 0.14;
+      const in_ = r() * 0.06;
+      const [x, z] = alongZ ? [cx, cz + t] : [cx + t, cz];
+      p.box(alongZ ? thick - in_ : step + 0.02, top, alongZ ? step + 0.02 : thick - in_, x, w.min[1] + 0.3, z, greens[Math.floor(r() * greens.length)]);
+    }
+  }
+  return p.merge();
+}
+
+/** Greenhouse frames: a low brick base, white uprights every 1.5 m and rails, for every glass wall. */
+export function greenhouseFrames(walls: Box[]): THREE.BufferGeometry {
+  const p = new Parts();
+  const FRAME = 0xe8efe9;
+  for (const w of walls) {
+    const alongZ = w.max[2] - w.min[2] > w.max[0] - w.min[0];
+    const len = alongZ ? w.max[2] - w.min[2] : w.max[0] - w.min[0];
+    const thick = alongZ ? w.max[0] - w.min[0] : w.max[2] - w.min[2];
+    const cx = (w.min[0] + w.max[0]) / 2;
+    const cz = (w.min[2] + w.max[2]) / 2;
+    const sized = (along: number, h: number, across: number): [number, number, number] => (alongZ ? [across, h, along] : [along, h, across]);
+    const y0 = w.min[1];
+    const h = w.max[1] - y0;
+    // Lintels over doors start high up: no base there.
+    if (y0 < 0.01) p.box(...sized(len, 0.8, thick + 0.04), cx, 0, cz, 0x8a4a35);
+    for (const y of [y0 < 0.01 ? 0.8 : y0, w.max[1] - 0.08]) p.box(...sized(len, 0.08, thick + 0.06), cx, y, cz, FRAME);
+    const n = Math.max(1, Math.round(len / 1.5));
+    for (let i = 0; i <= n; i++) {
+      const t = -len / 2 + (len / n) * i;
+      const [x, z] = alongZ ? [cx, cz + t] : [cx + t, cz];
+      p.box(...sized(0.07, h, thick + 0.06), x, y0, z, FRAME);
+    }
+  }
+  return p.merge();
 }
